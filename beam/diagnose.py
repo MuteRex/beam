@@ -116,7 +116,7 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
         return report
 
     s = result.stats
-    fps_target = float(cfg.get("fps") or 60)
+    fps_target = float(options.effective_fps(cfg))
     host_ms = s.get("host_ms", 0)
     report.metrics += [
         Metric("Codec used", result.codec, GOOD, ""),

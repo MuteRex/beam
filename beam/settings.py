@@ -8,7 +8,7 @@ from . import options
 from .launcher import is_fork, resolve_moonlight_bin
 
 RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
-FPS = ["30", "60", "90", "120", "144", "165"]
+FPS = ["30", "60", "75", "90", "100", "120", "144", "165"]
 CODECS = ["auto", "H.264", "HEVC", "AV1"]
 DECODERS = ["auto", "hardware", "software"]
 DISPLAY = ["fullscreen", "borderless", "windowed"]
@@ -40,7 +40,10 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._row(video, "Resolution", self.res)
 
         self.fps = _combo(FPS, str(self.config.get("fps")))
-        self._row(video, "Frame rate (FPS)", self.fps)
+        fps_row = self._row(video, "Frame rate (FPS)", self.fps)
+        custom_fps = int(self.config.get("custom_fps") or 0)
+        if custom_fps > 0:
+            fps_row.set_subtitle(f"Overridden by Advanced → Custom frame rate ({custom_fps})")
 
         self.bitrate = Adw.SpinRow(
             title="Bitrate (Mbps, 0 = auto)",
@@ -207,6 +210,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         r = Adw.ActionRow(title=title)
         r.add_suffix(widget)
         group.add(r)
+        return r
 
     def _save(self, *_):
         self.config["resolution"] = RESOLUTIONS[self.res.get_selected()]

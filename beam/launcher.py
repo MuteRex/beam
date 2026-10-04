@@ -57,8 +57,7 @@ class MoonlightLauncher:
             res = custom
         if res:
             args += ["--resolution", res]
-        if c.get("fps"):
-            args += ["--fps", str(c["fps"])]
+        args += ["--fps", str(options.effective_fps(c))]
         if c.get("bitrate"):
             args += ["--bitrate", str(c["bitrate"])]
         args += ["--video-codec", c.get("video_codec") or "auto",

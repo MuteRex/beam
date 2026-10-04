@@ -30,6 +30,9 @@ ADVANCED = [
     ("Video", [
         Option("custom_resolution", "entry", "Custom resolution",
                "e.g. 2560x1080, overrides General", "", "resolution"),
+        Option("custom_fps", "spin", "Custom frame rate",
+               "Any FPS, e.g. 75 or 100 to match a monitor; 0 = use General", 0,
+               "fps", low=0, high=240, step=1),
         Option("hdr", "switch", "HDR",
                "10-bit HDR when the host display and codec support it", False, "hdr"),
         Option("yuv444", "switch", "YUV 4:4:4",
@@ -87,12 +90,18 @@ def valid_resolution(text: str) -> bool:
     return bool(_RESOLUTION.match((text or "").strip()))
 
 
+def effective_fps(config: dict) -> int:
+    """Custom frame rate when set, otherwise the General preset."""
+    custom = int(config.get("custom_fps") or 0)
+    return custom if custom > 0 else int(config.get("fps") or 60)
+
+
 def cli_args(config: dict) -> list[str]:
-    """Moonlight flags for every advanced option except custom resolution,
-    which the launcher folds into its video arguments."""
+    """Moonlight flags for every advanced option except custom resolution and
+    frame rate, which the launcher folds into its video arguments."""
     args = []
     for o in ALL:
-        if not o.flag or o.key == "custom_resolution":
+        if not o.flag or o.key in ("custom_resolution", "custom_fps"):
             continue
         value = config.get(o.key, o.default)
         if o.kind == "switch":
