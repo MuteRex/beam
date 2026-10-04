@@ -45,9 +45,10 @@ class MoonlightLauncher:
         return resolve_moonlight_bin(self.config.get("moonlight_bin", ""))
 
     # ---- command construction -------------------------------------------
-    def _stream_args(self, address: str, app: str) -> list[str]:
+    def video_args(self) -> list[str]:
+        """Options that shape the video pipeline (shared with the benchmark)."""
         c = self.config
-        args = [self.bin, "stream"]
+        args = []
         res = (c.get("resolution") or "").strip()
         if res:
             args += ["--resolution", res]
@@ -55,6 +56,17 @@ class MoonlightLauncher:
             args += ["--fps", str(c["fps"])]
         if c.get("bitrate"):
             args += ["--bitrate", str(c["bitrate"])]
+        args += ["--video-codec", c.get("video_codec") or "auto",
+                 "--video-decoder", c.get("video_decoder") or "auto"]
+        args.append("--vsync" if c.get("vsync") else "--no-vsync")
+        args.append("--frame-pacing" if c.get("frame_pacing") else "--no-frame-pacing")
+        return args
+
+    def _stream_args(self, address: str, app: str) -> list[str]:
+        c = self.config
+        args = [self.bin, "stream", *self.video_args()]
+        args.append("--performance-overlay" if c.get("performance_overlay")
+                    else "--no-performance-overlay")
         if c.get("display_mode"):
             args += ["--display-mode", c["display_mode"]]
         # Mouse: desktop = remote-desktop optimized (cursor free, can leave the
@@ -73,6 +85,14 @@ class MoonlightLauncher:
         return args
 
     # ---- actions --------------------------------------------------------
+    def address_for(self, host) -> str:
+        """LAN address when Tailscale says the peer is directly on our LAN:
+        same machine, minus the WireGuard hop."""
+        lan = host.extra.get("lan_address")
+        if lan and self.config.get("prefer_lan", True):
+            return lan
+        return host.address
+
     def stream(self, address: str, app: str | None = None,
                display_pos: tuple[int, int] | None = None) -> list[str]:
         """Launch a stream detached; returns the argv used (for logging)."""

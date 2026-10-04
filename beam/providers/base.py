@@ -49,3 +49,8 @@ class DiscoveryProvider:
     # a reason string here to explain what's missing; None means ready.
     def readiness_error(self) -> Optional[str]:
         return None
+
+    # Optional hook: a faster address for the same host (e.g. its LAN IP when
+    # the overlay network routes directly over the LAN). "" means none.
+    def direct_address(self, host: Host) -> str:
+        return ""

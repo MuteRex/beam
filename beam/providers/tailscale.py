@@ -6,7 +6,9 @@ anywhere, no port-forwarding' for free, which is the Parsec-like feel.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -94,3 +96,22 @@ class TailscaleProvider(DiscoveryProvider):
         # Online first, then alphabetical.
         hosts.sort(key=lambda h: (not h.online, h.name.lower()))
         return hosts
+
+    def direct_address(self, host: Host) -> str:
+        """The peer's LAN IP when Tailscale reaches it directly over a private
+        network ("pong ... via 192.168.x.y:41641"); "" if relayed or unknown."""
+        try:
+            out = subprocess.run(
+                [self._bin, "ping", "-c", "1", "--timeout", "2s", host.address],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        m = re.search(r"via \[?([0-9a-fA-F.:]+?)\]?:\d+ in", out.stdout)
+        if not m:
+            return ""
+        try:
+            ip = ipaddress.ip_address(m.group(1))
+        except ValueError:
+            return ""
+        return str(ip) if ip.is_private and not ip.is_loopback else ""

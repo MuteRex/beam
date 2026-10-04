@@ -60,6 +60,10 @@ CSS = b"""
 .beam-connect:disabled { background: #2a2a2a; color: #777; }
 
 .pill-btn { border-radius: 999px; padding: 3px; }
+
+.diag-good { color: #9ae600; font-weight: 600; }
+.diag-ok { color: #f5c211; font-weight: 600; }
+.diag-bad { color: #ff6b6b; font-weight: 600; }
 """
 
 
@@ -120,6 +124,7 @@ class HostCard(Gtk.Box):
         m = Gio.Menu()
         m.append("Pair with host…", f"win.pair::{host.id}")
         m.append("Choose app…", f"win.apps::{host.id}")
+        m.append("Test connection…", f"win.test::{host.id}")
         menu_btn.set_menu_model(m)
         row.append(menu_btn)
         body.append(row)
@@ -264,7 +269,8 @@ class BeamWindow(Adw.ApplicationWindow):
             a.connect("activate", cb)
             self.add_action(a)
         for name, cb in (("pair", self._on_pair_action),
-                         ("apps", self._on_apps_action)):
+                         ("apps", self._on_apps_action),
+                         ("test", self._on_test_action)):
             a = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             a.connect("activate", cb)
             self.add_action(a)
@@ -325,6 +331,7 @@ class BeamWindow(Adw.ApplicationWindow):
             if not err:
                 hosts = provider.list_hosts()
                 probe.mark_hostable(hosts)
+                probe.mark_direct(provider, hosts)
             GLib.idle_add(self._on_hosts, provider, hosts, err)
 
         threading.Thread(target=work, daemon=True).start()
@@ -375,7 +382,7 @@ class BeamWindow(Adw.ApplicationWindow):
     # ---- host actions ---------------------------------------------------
     def on_connect(self, host: Host):
         try:
-            self.launcher.stream(host.address, display_pos=self._monitor_pos())
+            self.launcher.stream(self.launcher.address_for(host), display_pos=self._monitor_pos())
             disp = self.config.get("display_mode", "fullscreen")
             mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
                 else "cursor locked"
@@ -392,6 +399,77 @@ class BeamWindow(Adw.ApplicationWindow):
         host = self._hosts_by_id.get(param.get_string())
         if host:
             self._apps_dialog(host)
+
+    def _on_test_action(self, _action, param):
+        host = self._hosts_by_id.get(param.get_string())
+        if host:
+            self._test_dialog(host)
+
+    def _test_dialog(self, host: Host):
+        from . import diagnose
+
+        address = self.launcher.address_for(host)
+        dlg = Adw.Dialog(title=f"Test connection · {host.name}",
+                         content_width=520, content_height=600)
+        view = Adw.ToolbarView()
+        view.add_top_bar(Adw.HeaderBar())
+        dlg.set_child(view)
+
+        stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        view.set_content(stack)
+
+        busy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                       valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        spinner = Adw.Spinner(width_request=48, height_request=48)
+        busy.append(spinner)
+        status = Gtk.Label(label="Starting…")
+        status.add_css_class("dim-label")
+        busy.append(status)
+        note = Gtk.Label(label=f"Streams from {address} in the background\n"
+                               "using your current settings. Nothing opens on screen.",
+                         justify=Gtk.Justification.CENTER)
+        note.add_css_class("caption")
+        note.add_css_class("dim-label")
+        busy.append(note)
+        stack.add_named(busy, "busy")
+
+        def show(report):
+            page = Adw.PreferencesPage()
+            if report.error:
+                err = Adw.PreferencesGroup(title="Test failed", description=report.error)
+                page.add(err)
+            if report.metrics:
+                group = Adw.PreferencesGroup(
+                    title="Measured",
+                    description=f"{address} · targets are typical for a healthy LAN stream")
+                for m in report.metrics:
+                    row = Adw.ActionRow(title=m.label, subtitle=m.target)
+                    value = Gtk.Label(label=m.value)
+                    value.add_css_class(f"diag-{m.rating}")
+                    row.add_suffix(value)
+                    group.add(row)
+                page.add(group)
+            if report.advice:
+                tips = Adw.PreferencesGroup(title="What to improve")
+                for tip in report.advice:
+                    label = Gtk.Label(label=tip, wrap=True, xalign=0,
+                                      margin_top=10, margin_bottom=10,
+                                      margin_start=12, margin_end=12)
+                    tips.add(label)
+                page.add(tips)
+            stack.add_named(page, "result")
+            stack.set_visible_child_name("result")
+            return False
+
+        def work():
+            report = diagnose.run(
+                self.launcher, address,
+                self.config.get("default_app") or "Desktop",
+                progress=lambda msg: GLib.idle_add(status.set_label, msg))
+            GLib.idle_add(show, report)
+
+        threading.Thread(target=work, daemon=True).start()
+        dlg.present(self)
 
     def _pair_dialog(self, host: Host):
         dlg = Adw.AlertDialog(
@@ -430,7 +508,7 @@ class BeamWindow(Adw.ApplicationWindow):
         self._toast(f"Fetching apps on {host.name}…")
 
         def work():
-            apps = self.launcher.list_apps(host.address)
+            apps = self.launcher.list_apps(self.launcher.address_for(host))
             GLib.idle_add(self._show_apps, host, apps)
         threading.Thread(target=work, daemon=True).start()
 
@@ -453,7 +531,7 @@ class BeamWindow(Adw.ApplicationWindow):
         def on_resp(_d, resp):
             if resp == "go":
                 app = apps[drop.get_selected()]
-                self.launcher.stream(host.address, app, display_pos=self._monitor_pos())
+                self.launcher.stream(self.launcher.address_for(host), app, display_pos=self._monitor_pos())
                 self._toast(f"Streaming {app} from {host.name}…")
         dlg.connect("response", on_resp)
         dlg.present(self)

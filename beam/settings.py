@@ -7,7 +7,9 @@ from . import config as cfg
 from .launcher import is_fork, resolve_moonlight_bin
 
 RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
-FPS = ["30", "60", "90", "120"]
+FPS = ["30", "60", "90", "120", "144", "165"]
+CODECS = ["auto", "H.264", "HEVC", "AV1"]
+DECODERS = ["auto", "hardware", "software"]
 DISPLAY = ["fullscreen", "borderless", "windowed"]
 AUDIO = ["stereo", "5.1-surround", "7.1-surround"]
 
@@ -47,6 +49,36 @@ class SettingsDialog(Adw.PreferencesDialog):
 
         self.display = _combo(DISPLAY, self.config.get("display_mode"))
         self._row(video, "Display mode", self.display)
+
+        latency = Adw.PreferencesGroup(
+            title="Latency",
+            description="Defaults are tuned for the lowest delay. Use “Test "
+                        "connection” on a host card to measure the effect.")
+        page.add(latency)
+        self.codec = _combo(CODECS, self.config.get("video_codec", "auto"))
+        self._row(latency, "Video codec", self.codec)
+        self.decoder = _combo(DECODERS, self.config.get("video_decoder", "auto"))
+        self._row(latency, "Video decoder", self.decoder)
+        self.vsync = Adw.SwitchRow(
+            title="V-Sync",
+            subtitle="Off is fastest; on removes tearing but can add a frame",
+            active=bool(self.config.get("vsync")))
+        latency.add(self.vsync)
+        self.pacing = Adw.SwitchRow(
+            title="Frame pacing",
+            subtitle="Smoother motion at the cost of up to one frame of delay",
+            active=bool(self.config.get("frame_pacing")))
+        latency.add(self.pacing)
+        self.lan = Adw.SwitchRow(
+            title="Prefer LAN connection",
+            subtitle="Skip the Tailscale tunnel when the host is on this network",
+            active=bool(self.config.get("prefer_lan", True)))
+        latency.add(self.lan)
+        self.overlay = Adw.SwitchRow(
+            title="Performance stats in stream",
+            subtitle="Latency breakdown overlay (also in the Beam menu)",
+            active=bool(self.config.get("performance_overlay")))
+        latency.add(self.overlay)
 
         audio = Adw.PreferencesGroup(title="Audio & input")
         page.add(audio)
@@ -102,6 +134,12 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.config["audio_config"] = AUDIO[self.audio.get_selected()]
         self.config["multi_controller"] = self.multi.get_active()
         self.config["default_app"] = self.app.get_text().strip() or "Desktop"
+        self.config["video_codec"] = CODECS[self.codec.get_selected()]
+        self.config["video_decoder"] = DECODERS[self.decoder.get_selected()]
+        self.config["vsync"] = self.vsync.get_active()
+        self.config["frame_pacing"] = self.pacing.get_active()
+        self.config["prefer_lan"] = self.lan.get_active()
+        self.config["performance_overlay"] = self.overlay.get_active()
         self.config["moonlight_bin"] = self.bin.get_text().strip()
         self.config["show_pill"] = self.pill.get_active()
         cfg.save(self.config)

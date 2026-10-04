@@ -24,6 +24,22 @@ def is_hostable(address: str, timeout: float = 0.7) -> bool:
     return False
 
 
+def mark_direct(provider, hosts, timeout: float = 0.7) -> None:
+    """Set host.extra['lan_address'] for hosts the provider can reach more
+    directly, but only if Sunshine actually answers on that address."""
+    hostable = [h for h in hosts if h.extra.get("hostable")]
+    if not hostable:
+        return
+
+    def check(h):
+        lan = provider.direct_address(h)
+        return h, lan if lan and is_hostable(lan, timeout) else ""
+
+    with ThreadPoolExecutor(max_workers=min(8, len(hostable))) as ex:
+        for h, lan in ex.map(check, hostable):
+            h.extra["lan_address"] = lan
+
+
 def mark_hostable(hosts, timeout: float = 0.7) -> None:
     """Set host.extra['hostable'] on each host, probing online ones in parallel.
     Offline hosts are never hostable."""

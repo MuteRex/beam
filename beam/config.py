@@ -22,6 +22,14 @@ DEFAULTS = {
                                  # game = cursor locked/relative
     "moonlight_bin": "",         # "" = auto: Beam fork, then system, then snap
     "show_pill": True,           # in-stream Beam pill (fork only)
+    # Latency / quality. Always passed explicitly so Moonlight's own saved
+    # preferences never silently change a stream.
+    "video_codec": "auto",       # auto / H.264 / HEVC / AV1
+    "video_decoder": "auto",     # auto / hardware / software
+    "vsync": False,              # off = lowest latency, may tear
+    "frame_pacing": False,       # on = smoother, adds up to a frame
+    "performance_overlay": False,
+    "prefer_lan": True,          # use the LAN IP when Tailscale is direct
 }
 
 
