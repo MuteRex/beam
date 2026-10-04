@@ -72,7 +72,8 @@ class MoonlightLauncher:
         return args
 
     # ---- actions --------------------------------------------------------
-    def stream(self, address: str, app: str | None = None) -> list[str]:
+    def stream(self, address: str, app: str | None = None,
+               display_pos: tuple[int, int] | None = None) -> list[str]:
         """Launch a stream detached; returns the argv used (for logging)."""
         app = app or self.config.get("default_app") or "Desktop"
         args = self._stream_args(address, app)
@@ -81,6 +82,9 @@ class MoonlightLauncher:
             Gio.SubprocessFlags.STDERR_SILENCE)
         if not self.config.get("show_pill", True):
             launcher.setenv("BEAM_HIDE_PILL", "1", True)
+        if display_pos is not None:
+            # The fork opens the stream on this monitor (Wayland can't tell it)
+            launcher.setenv("BEAM_DISPLAY_POS", "%d,%d" % display_pos, True)
         launcher.spawnv(args)
         return args
 

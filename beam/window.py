@@ -126,6 +126,17 @@ class HostCard(Gtk.Box):
 
 
 class BeamWindow(Adw.ApplicationWindow):
+    def _monitor_pos(self):
+        """Layout position of the monitor Beam is on, so the stream opens there."""
+        surface = self.get_surface()
+        if surface is None:
+            return None
+        monitor = self.get_display().get_monitor_at_surface(surface)
+        if monitor is None:
+            return None
+        g = monitor.get_geometry()
+        return (g.x, g.y)
+
     def __init__(self, app):
         super().__init__(application=app, title="Beam")
         self.set_default_size(820, 580)
@@ -364,7 +375,7 @@ class BeamWindow(Adw.ApplicationWindow):
     # ---- host actions ---------------------------------------------------
     def on_connect(self, host: Host):
         try:
-            self.launcher.stream(host.address)
+            self.launcher.stream(host.address, display_pos=self._monitor_pos())
             disp = self.config.get("display_mode", "fullscreen")
             mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
                 else "cursor locked"
@@ -442,7 +453,7 @@ class BeamWindow(Adw.ApplicationWindow):
         def on_resp(_d, resp):
             if resp == "go":
                 app = apps[drop.get_selected()]
-                self.launcher.stream(host.address, app)
+                self.launcher.stream(host.address, app, display_pos=self._monitor_pos())
                 self._toast(f"Streaming {app} from {host.name}…")
         dlg.connect("response", on_resp)
         dlg.present(self)
