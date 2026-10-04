@@ -61,10 +61,38 @@ CSS = b"""
 
 .pill-btn { border-radius: 999px; padding: 3px; }
 
+.route-chip {
+  font-size: 0.75em; font-weight: 700; padding: 1px 7px;
+  border-radius: 999px; background: #262626; color: #aaa;
+}
+.route-lan { background: #243018; color: #9ae600; }
+.route-relay { background: #33270f; color: #f5c211; }
+
 .diag-good { color: #9ae600; font-weight: 600; }
 .diag-ok { color: #f5c211; font-weight: 600; }
 .diag-bad { color: #ff6b6b; font-weight: 600; }
 """
+
+
+def route_chips(host: Host):
+    """Small badges for each way Beam can reach the host, fastest first."""
+    routes = {r["kind"] for r in host.extra.get("routes") or []}
+    labels = []
+    if "lan" in routes or host.extra.get("lan_address"):
+        labels.append(("LAN", "route-lan"))
+    if "tailscale" in routes:
+        relay = host.extra.get("ts_path") == "relay"
+        labels.append(("Tailscale relay" if relay else "Tailscale",
+                       "route-relay" if relay else "route-tailscale"))
+    if not labels:
+        return None
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, halign=Gtk.Align.START)
+    for text, css in labels:
+        chip = Gtk.Label(label=text)
+        chip.add_css_class("route-chip")
+        chip.add_css_class(css)
+        box.append(chip)
+    return box
 
 
 class HostCard(Gtk.Box):
@@ -111,6 +139,10 @@ class HostCard(Gtk.Box):
         slabel.add_css_class("caption")
         status.append(slabel)
         body.append(status)
+
+        chips = route_chips(host)
+        if chips:
+            body.append(chips)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         connect = Gtk.Button(label="Connect", hexpand=True)
@@ -191,7 +223,7 @@ class BeamWindow(Adw.ApplicationWindow):
         self.provider_ids = list(self.providers.keys())
         self.provider_drop = Gtk.DropDown.new_from_strings(
             [p.label for p in self.providers.values()])
-        start = self.config.get("provider", "tailscale")
+        start = self.config.get("provider", "auto")
         if start in self.provider_ids:
             self.provider_drop.set_selected(self.provider_ids.index(start))
         self.provider_drop.connect("notify::selected", self._on_provider_changed)
@@ -495,7 +527,7 @@ class BeamWindow(Adw.ApplicationWindow):
             self._toast(f"Pairing… enter {pin} in Sunshine on {host.name}.")
 
             def work():
-                ok, msg = self.launcher.pair(host.address, pin)
+                ok, msg = self.launcher.pair(self.launcher.address_for(host), pin)
                 GLib.idle_add(self._toast,
                               f"Paired with {host.name}." if ok
                               else f"Pairing failed: {msg or 'see Sunshine'}")

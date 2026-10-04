@@ -91,7 +91,8 @@ class TailscaleProvider(DiscoveryProvider):
                 online=online,
                 detail="Online" if online else _ago(peer.get("LastSeen", "")),
                 provider=self.id,
-                extra={"dns": (peer.get("DNSName") or "").rstrip(".")},
+                extra={"dns": (peer.get("DNSName") or "").rstrip("."),
+                       "routes": [{"kind": "tailscale", "address": addr}]},
             ))
         # Online first, then alphabetical.
         hosts.sort(key=lambda h: (not h.online, h.name.lower()))
@@ -107,9 +108,13 @@ class TailscaleProvider(DiscoveryProvider):
             )
         except (OSError, subprocess.TimeoutExpired):
             return ""
+        if re.search(r"via DERP\(", out.stdout):
+            host.extra["ts_path"] = "relay"
+            return ""
         m = re.search(r"via \[?([0-9a-fA-F.:]+?)\]?:\d+ in", out.stdout)
         if not m:
             return ""
+        host.extra["ts_path"] = "direct"
         try:
             ip = ipaddress.ip_address(m.group(1))
         except ValueError:

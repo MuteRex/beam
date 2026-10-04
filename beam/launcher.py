@@ -86,12 +86,16 @@ class MoonlightLauncher:
 
     # ---- actions --------------------------------------------------------
     def address_for(self, host) -> str:
-        """LAN address when Tailscale says the peer is directly on our LAN:
-        same machine, minus the WireGuard hop."""
-        lan = host.extra.get("lan_address")
+        """Fastest route to the host: its LAN address (found locally, or a
+        Tailscale peer that is directly on our LAN) unless LAN preference is
+        off, then the tailnet address."""
+        routes = host.extra.get("routes") or []
+        lan = next((r["address"] for r in routes if r["kind"] == "lan"), "") \
+            or host.extra.get("lan_address", "")
+        tailnet = next((r["address"] for r in routes if r["kind"] == "tailscale"), "")
         if lan and self.config.get("prefer_lan", True):
             return lan
-        return host.address
+        return tailnet or lan or host.address
 
     def stream(self, address: str, app: str | None = None,
                display_pos: tuple[int, int] | None = None) -> list[str]:

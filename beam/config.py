@@ -9,7 +9,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
 DEFAULTS = {
-    "provider": "tailscale",
+    "provider": "auto",
     "resolution": "1920x1080",   # "" = Moonlight default
     "fps": 60,
     "bitrate": 0,                # Kbps, 0 = Moonlight auto

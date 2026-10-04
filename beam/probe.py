@@ -6,7 +6,9 @@ quick TCP connect tells us whether it's a real host.
 """
 from __future__ import annotations
 
+import re
 import socket
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 # Sunshine / GameStream control ports. 47989 = HTTP serverinfo (always open when
@@ -24,10 +26,26 @@ def is_hostable(address: str, timeout: float = 0.7) -> bool:
     return False
 
 
+def server_identity(address: str, timeout: float = 1.5) -> tuple[str, str] | None:
+    """(uniqueid, hostname) from Sunshine's unauthenticated serverinfo. The
+    uniqueid identifies the same machine across LAN and Tailscale addresses."""
+    host = f"[{address}]" if ":" in address else address
+    try:
+        with urllib.request.urlopen(f"http://{host}:47989/serverinfo", timeout=timeout) as r:
+            xml = r.read(65536).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return None
+    uid = re.search(r"<uniqueid>([^<]+)<", xml)
+    name = re.search(r"<hostname>([^<]*)<", xml)
+    if not uid:
+        return None
+    return uid.group(1).strip(), (name.group(1).strip() if name else "")
+
+
 def mark_direct(provider, hosts, timeout: float = 0.7) -> None:
     """Set host.extra['lan_address'] for hosts the provider can reach more
     directly, but only if Sunshine actually answers on that address."""
-    hostable = [h for h in hosts if h.extra.get("hostable")]
+    hostable = [h for h in hosts if h.extra.get("hostable") and "lan_address" not in h.extra]
     if not hostable:
         return
 
@@ -43,7 +61,7 @@ def mark_direct(provider, hosts, timeout: float = 0.7) -> None:
 def mark_hostable(hosts, timeout: float = 0.7) -> None:
     """Set host.extra['hostable'] on each host, probing online ones in parallel.
     Offline hosts are never hostable."""
-    online = [h for h in hosts if h.online]
+    online = [h for h in hosts if h.online and "hostable" not in h.extra]
     for h in hosts:
         if not h.online:
             h.extra["hostable"] = False
