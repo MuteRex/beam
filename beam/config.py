@@ -17,6 +17,7 @@ DEFAULTS = {
     "audio_config": "stereo",    # stereo / 5.1-surround / 7.1-surround
     "default_app": "Desktop",    # which Sunshine app to stream
     "multi_controller": True,
+    "show_all_devices": False,   # False = only connectable hosts
 }
 
 
