@@ -11,6 +11,7 @@ RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
 FPS = ["30", "60", "75", "90", "100", "120", "144", "165"]
 CODECS = ["auto", "H.264", "HEVC", "AV1"]
 DECODERS = ["auto", "hardware", "software"]
+STATS_LEVELS = ["off", "basic", "standard", "advanced"]
 DISPLAY = ["fullscreen", "borderless", "windowed"]
 AUDIO = ["stereo", "5.1-surround", "7.1-surround"]
 
@@ -79,11 +80,14 @@ class SettingsDialog(Adw.PreferencesDialog):
             subtitle="Skip the Tailscale tunnel when the host is on this network",
             active=bool(self.config.get("prefer_lan", True)))
         latency.add(self.lan)
-        self.overlay = Adw.SwitchRow(
+        self.stats = Adw.ComboRow(
             title="Performance stats in stream",
-            subtitle="Latency breakdown overlay (also in the Beam menu)",
-            active=bool(self.config.get("performance_overlay")))
-        latency.add(self.overlay)
+            subtitle="Basic: FPS + latency · Standard: + breakdown · "
+                     "Advanced: + network and hardware. Change it in-stream from the Beam menu",
+            model=Gtk.StringList.new([s.capitalize() for s in STATS_LEVELS]))
+        current = self.config.get("stats_level", "off")
+        self.stats.set_selected(STATS_LEVELS.index(current) if current in STATS_LEVELS else 0)
+        latency.add(self.stats)
 
         audio = Adw.PreferencesGroup(title="Audio &amp; input")
         page.add(audio)
@@ -225,7 +229,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.config["vsync"] = self.vsync.get_active()
         self.config["frame_pacing"] = self.pacing.get_active()
         self.config["prefer_lan"] = self.lan.get_active()
-        self.config["performance_overlay"] = self.overlay.get_active()
+        self.config["stats_level"] = STATS_LEVELS[self.stats.get_selected()]
         self.config["moonlight_bin"] = self.bin.get_text().strip()
         for o in options.ALL:
             self.config[o.key] = self._option_value(o)

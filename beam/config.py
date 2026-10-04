@@ -30,7 +30,7 @@ DEFAULTS = {
     "video_decoder": "auto",     # auto / hardware / software
     "vsync": False,              # off = lowest latency, may tear
     "frame_pacing": False,       # on = smoother, adds up to a frame
-    "performance_overlay": False,
+    "stats_level": "off",        # off / basic / standard / advanced
     "prefer_lan": True,          # use the LAN IP when Tailscale is direct
     **ADVANCED_DEFAULTS,         # Settings → Advanced (see options.py)
 }
@@ -38,10 +38,15 @@ DEFAULTS = {
 
 def load() -> dict:
     cfg = dict(DEFAULTS)
+    saved = {}
     try:
-        cfg.update(json.loads(CONFIG_PATH.read_text()))
+        saved = json.loads(CONFIG_PATH.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         pass
+    cfg.update(saved)
+    # Old boolean overlay switch → stats level
+    if "stats_level" not in saved and saved.get("performance_overlay"):
+        cfg["stats_level"] = "standard"
     # keep only known keys, backfill new ones
     return {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
 

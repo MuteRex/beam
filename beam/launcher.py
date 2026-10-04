@@ -69,8 +69,8 @@ class MoonlightLauncher:
     def _stream_args(self, address: str, app: str) -> list[str]:
         c = self.config
         args = [self.bin, "stream", *self.video_args(), *options.cli_args(c)]
-        args.append("--performance-overlay" if c.get("performance_overlay")
-                    else "--no-performance-overlay")
+        stats = c.get("stats_level") or "off"
+        args.append("--no-performance-overlay" if stats == "off" else "--performance-overlay")
         if c.get("display_mode"):
             args += ["--display-mode", c["display_mode"]]
         # Mouse: desktop = remote-desktop optimized (cursor free, can leave the
@@ -111,6 +111,9 @@ class MoonlightLauncher:
             Gio.SubprocessFlags.STDERR_SILENCE)
         if not self.config.get("show_pill", True):
             launcher.setenv("BEAM_HIDE_PILL", "1", True)
+        if (self.config.get("stats_level") or "off") != "off":
+            # The fork's stats panel level (it cycles in-stream from the Beam menu)
+            launcher.setenv("BEAM_STATS_LEVEL", self.config["stats_level"], True)
         if display_pos is not None:
             # The fork opens the stream on this monitor (Wayland can't tell it)
             launcher.setenv("BEAM_DISPLAY_POS", "%d,%d" % display_pos, True)
