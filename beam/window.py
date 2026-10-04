@@ -61,6 +61,10 @@ CSS = b"""
 
 .pill-btn { border-radius: 999px; padding: 3px; }
 
+/* Beam lime instead of the default accent blue */
+switch:checked { background-color: #9ae600; }
+switch:checked > slider { background-color: #0c0c0c; }
+
 .route-chip {
   font-size: 0.75em; font-weight: 700; padding: 1px 7px;
   border-radius: 999px; background: #262626; color: #aaa;
@@ -497,6 +501,7 @@ class BeamWindow(Adw.ApplicationWindow):
             report = diagnose.run(
                 self.launcher, address,
                 self.config.get("default_app") or "Desktop",
+                seconds=int(self.config.get("test_seconds") or 15),
                 progress=lambda msg: GLib.idle_add(status.set_label, msg))
             GLib.idle_add(show, report)
 

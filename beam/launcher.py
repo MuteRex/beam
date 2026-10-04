@@ -12,6 +12,8 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
+from . import options
+
 
 # Self-built Moonlight fork with the in-stream Beam pill (see FORK_PLAN.md)
 FORK_BIN = Path.home() / "beam-moonlight" / "app" / "moonlight"
@@ -50,6 +52,9 @@ class MoonlightLauncher:
         c = self.config
         args = []
         res = (c.get("resolution") or "").strip()
+        custom = (c.get("custom_resolution") or "").strip()
+        if options.valid_resolution(custom):
+            res = custom
         if res:
             args += ["--resolution", res]
         if c.get("fps"):
@@ -64,7 +69,7 @@ class MoonlightLauncher:
 
     def _stream_args(self, address: str, app: str) -> list[str]:
         c = self.config
-        args = [self.bin, "stream", *self.video_args()]
+        args = [self.bin, "stream", *self.video_args(), *options.cli_args(c)]
         args.append("--performance-overlay" if c.get("performance_overlay")
                     else "--no-performance-overlay")
         if c.get("display_mode"):

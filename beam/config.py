@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+from .options import DEFAULTS as ADVANCED_DEFAULTS
+
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "beam"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
@@ -30,6 +32,7 @@ DEFAULTS = {
     "frame_pacing": False,       # on = smoother, adds up to a frame
     "performance_overlay": False,
     "prefer_lan": True,          # use the LAN IP when Tailscale is direct
+    **ADVANCED_DEFAULTS,         # Settings → Advanced (see options.py)
 }
 
 

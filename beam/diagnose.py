@@ -9,7 +9,7 @@ import subprocess
 import urllib.request
 from dataclasses import dataclass, field
 
-from . import bench
+from . import bench, options
 
 # Bits of Sunshine's ServerCodecModeSupport
 SCM_H264 = 0x00001
@@ -101,7 +101,9 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
                                      GOOD if hw else BAD, "H.264 + HEVC (+ AV1)"))
 
     progress(f"Streaming for {seconds}s (headless)…")
-    case = bench.Case("current settings", launcher.video_args())
+    # Same flags as a real stream, minus quitting the host app afterwards
+    flags = [a for a in options.cli_args(cfg) if a not in ("--quit-after",)]
+    case = bench.Case("current settings", launcher.video_args() + flags)
     try:
         with bench.HeadlessCompositor(*_resolution(cfg)) as comp:
             result = bench.run_case(launcher.bin, address, app, case, seconds, comp)
@@ -161,7 +163,9 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
 
 def _resolution(cfg) -> tuple[int, int]:
     try:
-        w, h = (int(v) for v in (cfg.get("resolution") or "1920x1080").split("x"))
+        res = cfg.get("custom_resolution") if options.valid_resolution(cfg.get("custom_resolution", "")) \
+            else cfg.get("resolution")
+        w, h = (int(v) for v in (res or "1920x1080").split("x"))
         return w, h
     except ValueError:
         return 1920, 1080

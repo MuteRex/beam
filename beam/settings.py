@@ -4,6 +4,7 @@ from __future__ import annotations
 from gi.repository import Adw, Gtk
 
 from . import config as cfg
+from . import options
 from .launcher import is_fork, resolve_moonlight_bin
 
 RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
@@ -28,7 +29,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.window = window
         self.config = window.config
 
-        page = Adw.PreferencesPage(icon_name="preferences-system-symbolic")
+        page = Adw.PreferencesPage(title="General",
+                                   icon_name="preferences-system-symbolic")
         self.add(page)
 
         video = Adw.PreferencesGroup(title="Video")
@@ -80,7 +82,7 @@ class SettingsDialog(Adw.PreferencesDialog):
             active=bool(self.config.get("performance_overlay")))
         latency.add(self.overlay)
 
-        audio = Adw.PreferencesGroup(title="Audio & input")
+        audio = Adw.PreferencesGroup(title="Audio &amp; input")
         page.add(audio)
         self.audio = _combo(AUDIO, self.config.get("audio_config"))
         self._row(audio, "Audio", self.audio)
@@ -94,11 +96,13 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.app.set_text(self.config.get("default_app", "Desktop"))
         apps.add(self.app)
 
+        advanced = self._build_advanced_page()
+
         client = Adw.PreferencesGroup(
             title="Moonlight client",
             description="Leave the path empty to use the Beam fork when it is "
                         "built, otherwise the system Moonlight.")
-        page.add(client)
+        advanced.add(client)
         self.bin = Adw.EntryRow(title="Moonlight binary (empty = auto)")
         self.bin.set_text(self.config.get("moonlight_bin", ""))
         self.bin.connect("changed", self._update_bin_status)
@@ -113,6 +117,7 @@ class SettingsDialog(Adw.PreferencesDialog):
             active=bool(self.config.get("show_pill", True)))
         client.add(self.pill)
         self._update_bin_status()
+        advanced.add(self._reset_group)
 
         self.connect("closed", self._save)
 
@@ -120,6 +125,83 @@ class SettingsDialog(Adw.PreferencesDialog):
         path = resolve_moonlight_bin(self.bin.get_text())
         self.bin_status.set_subtitle(path)
         self.pill.set_sensitive(is_fork(path))
+
+    # ---- Advanced page ------------------------------------------------
+    def _build_advanced_page(self):
+        page = Adw.PreferencesPage(title="Advanced",
+                                   icon_name="applications-engineering-symbolic")
+        self.add(page)
+        self.advanced_page = page
+        self.adv = {}
+
+        for title, opts in options.ADVANCED:
+            group = Adw.PreferencesGroup(title=title)
+            page.add(group)
+            for o in opts:
+                group.add(self._option_row(o))
+
+        reset_group = Adw.PreferencesGroup()
+        reset = Adw.ButtonRow(title="Reset advanced settings")
+        reset.add_css_class("destructive-action")
+        reset.connect("activated", self._reset_advanced)
+        reset_group.add(reset)
+        self._reset_group = reset_group
+        return page
+
+    def _option_row(self, o):
+        value = self.config.get(o.key, o.default)
+        if o.kind == "switch":
+            row = Adw.SwitchRow(title=o.title, subtitle=o.subtitle, active=bool(value))
+        elif o.kind == "choice":
+            row = Adw.ComboRow(title=o.title, subtitle=o.subtitle,
+                               model=Gtk.StringList.new(list(o.choices)))
+            row.set_selected(o.choices.index(value) if value in o.choices
+                             else o.choices.index(o.default))
+        elif o.kind == "spin":
+            row = Adw.SpinRow(title=o.title, subtitle=o.subtitle,
+                              adjustment=Gtk.Adjustment(lower=o.low, upper=o.high,
+                                                        step_increment=o.step,
+                                                        value=int(value or 0)))
+        else:
+            row = Adw.EntryRow(title=f"{o.title} — {o.subtitle}" if o.subtitle else o.title)
+            row.set_text(str(value or ""))
+            if o.key == "custom_resolution":
+                row.connect("changed", self._check_resolution)
+        self.adv[o.key] = row
+        return row
+
+    def _check_resolution(self, row):
+        text = row.get_text().strip()
+        if text and not options.valid_resolution(text):
+            row.add_css_class("error")
+        else:
+            row.remove_css_class("error")
+
+    def _option_value(self, o):
+        row = self.adv[o.key]
+        if o.kind == "switch":
+            return row.get_active()
+        if o.kind == "choice":
+            return o.choices[row.get_selected()]
+        if o.kind == "spin":
+            return int(row.get_value())
+        text = row.get_text().strip()
+        if o.key == "custom_resolution" and not options.valid_resolution(text):
+            return ""
+        return text
+
+    def _reset_advanced(self, *_):
+        for o in options.ALL:
+            row = self.adv[o.key]
+            if o.kind == "switch":
+                row.set_active(bool(o.default))
+            elif o.kind == "choice":
+                row.set_selected(o.choices.index(o.default))
+            elif o.kind == "spin":
+                row.set_value(int(o.default))
+            else:
+                row.set_text(str(o.default))
+        self.add_toast(Adw.Toast.new("Advanced settings reset to defaults"))
 
     def _row(self, group, title, widget):
         r = Adw.ActionRow(title=title)
@@ -141,6 +223,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.config["prefer_lan"] = self.lan.get_active()
         self.config["performance_overlay"] = self.overlay.get_active()
         self.config["moonlight_bin"] = self.bin.get_text().strip()
+        for o in options.ALL:
+            self.config[o.key] = self._option_value(o)
         self.config["show_pill"] = self.pill.get_active()
         cfg.save(self.config)
         self.window.launcher.config = self.config
