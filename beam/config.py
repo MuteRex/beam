@@ -18,6 +18,8 @@ DEFAULTS = {
     "default_app": "Desktop",    # which Sunshine app to stream
     "multi_controller": True,
     "show_all_devices": False,   # False = only connectable hosts
+    "mouse_mode": "desktop",     # desktop = cursor free (absolute);
+                                 # game = cursor locked/relative
 }
 
 

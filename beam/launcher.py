@@ -37,6 +37,13 @@ class MoonlightLauncher:
             args += ["--bitrate", str(c["bitrate"])]
         if c.get("display_mode"):
             args += ["--display-mode", c["display_mode"]]
+        # Mouse: desktop = remote-desktop optimized (cursor free, can leave the
+        # window); game = captured/relative (locked to the window, needed for
+        # mouselook).
+        if c.get("mouse_mode", "desktop") == "desktop":
+            args += ["--absolute-mouse"]
+        else:
+            args += ["--no-absolute-mouse"]
         if c.get("audio_config"):
             args += ["--audio-config", c["audio_config"]]
         if c.get("multi_controller"):

@@ -228,6 +228,10 @@ class BeamWindow(Adw.ApplicationWindow):
         btn.add_css_class("pill-btn")
         btn.set_child(Gtk.Image.new_from_icon_name("avatar-default-symbolic"))
         menu = Gio.Menu()
+        mouse = Gio.Menu()
+        mouse.append("Desktop (cursor free)", "win.mouse-mode::desktop")
+        mouse.append("Game (cursor locked)", "win.mouse-mode::game")
+        menu.append_section("Mouse", mouse)
         sec1 = Gio.Menu()
         sec1.append("Show all devices", "win.show-all")
         menu.append_section(None, sec1)
@@ -259,6 +263,12 @@ class BeamWindow(Adw.ApplicationWindow):
         show_all.connect("change-state", self._on_show_all)
         self.add_action(show_all)
 
+        mouse_mode = Gio.SimpleAction.new_stateful(
+            "mouse-mode", GLib.VariantType.new("s"),
+            GLib.Variant.new_string(self.config.get("mouse_mode", "desktop")))
+        mouse_mode.connect("activate", self._on_mouse_mode)
+        self.add_action(mouse_mode)
+
     # ---- provider / mode / filter --------------------------------------
     def _current_provider(self):
         return self.providers[self.provider_ids[self.provider_drop.get_selected()]]
@@ -279,6 +289,14 @@ class BeamWindow(Adw.ApplicationWindow):
         self.config["show_all_devices"] = value.get_boolean()
         cfg.save(self.config)
         self._render_hosts()  # re-filter without re-probing
+
+    def _on_mouse_mode(self, action, param):
+        mode = param.get_string()
+        action.set_state(param)
+        self.config["mouse_mode"] = mode
+        cfg.save(self.config)
+        self.launcher.config = self.config
+        self._toast(f"Mouse: {'cursor free' if mode == 'desktop' else 'cursor locked'}")
 
     # ---- refresh --------------------------------------------------------
     def refresh(self):
@@ -347,8 +365,10 @@ class BeamWindow(Adw.ApplicationWindow):
     def on_connect(self, host: Host):
         try:
             self.launcher.stream(host.address)
-            mode = self.config.get("display_mode", "fullscreen")
-            self._toast(f"Connecting to {host.name} ({mode})…")
+            disp = self.config.get("display_mode", "fullscreen")
+            mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
+                else "cursor locked"
+            self._toast(f"Connecting to {host.name} · {disp} · {mouse}…")
         except Exception as e:  # noqa: BLE001
             self._toast(f"Launch failed: {e}")
 
