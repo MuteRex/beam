@@ -68,7 +68,8 @@ class MoonlightLauncher:
             args += ["--audio-config", c["audio_config"]]
         if c.get("multi_controller"):
             args += ["--multi-controller"]
-        args += [address, app]
+        # "--" so host-supplied app names can't be parsed as options
+        args += ["--", address, app]
         return args
 
     # ---- actions --------------------------------------------------------
@@ -92,7 +93,7 @@ class MoonlightLauncher:
         """Blocking pair. Run off the main thread. Returns (ok, message)."""
         try:
             out = subprocess.run(
-                [self.bin, "pair", address, "--pin", pin],
+                [self.bin, "pair", "--pin", pin, "--", address],
                 capture_output=True, text=True, timeout=60,
             )
         except FileNotFoundError:
@@ -108,7 +109,7 @@ class MoonlightLauncher:
         """Blocking app list. Run off the main thread."""
         try:
             out = subprocess.run(
-                [self.bin, "list", address],
+                [self.bin, "list", "--", address],
                 capture_output=True, text=True, timeout=20,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
