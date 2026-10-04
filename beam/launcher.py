@@ -5,24 +5,44 @@ the user's saved preferences and launches it without blocking the UI.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+from pathlib import Path
 
 from gi.repository import Gio, GLib
 
 
-def _moonlight_bin() -> str:
+# Self-built Moonlight fork with the in-stream Beam pill (see FORK_PLAN.md)
+FORK_BIN = Path.home() / "beam-moonlight" / "app" / "moonlight"
+
+
+def resolve_moonlight_bin(configured: str = "") -> str:
+    """Configured path if usable, else the Beam fork, else system/snap."""
+    configured = os.path.expanduser((configured or "").strip())
+    if configured and os.access(configured, os.X_OK):
+        return configured
+    if os.access(FORK_BIN, os.X_OK):
+        return str(FORK_BIN)
     for cand in ("moonlight", "/snap/bin/moonlight"):
-        p = shutil.which(cand) or (cand if shutil.which(cand) else None)
+        p = shutil.which(cand)
         if p:
             return p
     return "moonlight"
 
 
+def is_fork(path: str) -> bool:
+    return Path(path).resolve() == FORK_BIN.resolve()
+
+
 class MoonlightLauncher:
     def __init__(self, config: dict):
         self.config = config
-        self.bin = _moonlight_bin()
+
+    @property
+    def bin(self) -> str:
+        # Resolved per call so a Settings change applies without a restart
+        return resolve_moonlight_bin(self.config.get("moonlight_bin", ""))
 
     # ---- command construction -------------------------------------------
     def _stream_args(self, address: str, app: str) -> list[str]:
@@ -56,9 +76,12 @@ class MoonlightLauncher:
         """Launch a stream detached; returns the argv used (for logging)."""
         app = app or self.config.get("default_app") or "Desktop"
         args = self._stream_args(address, app)
-        flags = (Gio.SubprocessFlags.STDOUT_SILENCE |
-                 Gio.SubprocessFlags.STDERR_SILENCE)
-        Gio.Subprocess.new(args, flags)
+        launcher = Gio.SubprocessLauncher.new(
+            Gio.SubprocessFlags.STDOUT_SILENCE |
+            Gio.SubprocessFlags.STDERR_SILENCE)
+        if not self.config.get("show_pill", True):
+            launcher.setenv("BEAM_HIDE_PILL", "1", True)
+        launcher.spawnv(args)
         return args
 
     def pair(self, address: str, pin: str) -> tuple[bool, str]:

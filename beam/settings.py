@@ -4,6 +4,7 @@ from __future__ import annotations
 from gi.repository import Adw, Gtk
 
 from . import config as cfg
+from .launcher import is_fork, resolve_moonlight_bin
 
 RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
 FPS = ["30", "60", "90", "120"]
@@ -61,7 +62,32 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.app.set_text(self.config.get("default_app", "Desktop"))
         apps.add(self.app)
 
+        client = Adw.PreferencesGroup(
+            title="Moonlight client",
+            description="Leave the path empty to use the Beam fork when it is "
+                        "built, otherwise the system Moonlight.")
+        page.add(client)
+        self.bin = Adw.EntryRow(title="Moonlight binary (empty = auto)")
+        self.bin.set_text(self.config.get("moonlight_bin", ""))
+        self.bin.connect("changed", self._update_bin_status)
+        client.add(self.bin)
+        self.bin_status = Adw.ActionRow(title="In use")
+        self.bin_status.add_css_class("property")
+        client.add(self.bin_status)
+        self.pill = Adw.SwitchRow(
+            title="In-stream Beam button",
+            subtitle="Clickable menu at the top of the stream "
+                     "(Ctrl+Alt+Shift+B opens it either way)",
+            active=bool(self.config.get("show_pill", True)))
+        client.add(self.pill)
+        self._update_bin_status()
+
         self.connect("closed", self._save)
+
+    def _update_bin_status(self, *_):
+        path = resolve_moonlight_bin(self.bin.get_text())
+        self.bin_status.set_subtitle(path)
+        self.pill.set_sensitive(is_fork(path))
 
     def _row(self, group, title, widget):
         r = Adw.ActionRow(title=title)
@@ -76,5 +102,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.config["audio_config"] = AUDIO[self.audio.get_selected()]
         self.config["multi_controller"] = self.multi.get_active()
         self.config["default_app"] = self.app.get_text().strip() or "Desktop"
+        self.config["moonlight_bin"] = self.bin.get_text().strip()
+        self.config["show_pill"] = self.pill.get_active()
         cfg.save(self.config)
         self.window.launcher.config = self.config

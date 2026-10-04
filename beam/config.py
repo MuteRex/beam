@@ -20,6 +20,8 @@ DEFAULTS = {
     "show_all_devices": False,   # False = only connectable hosts
     "mouse_mode": "desktop",     # desktop = cursor free (absolute);
                                  # game = cursor locked/relative
+    "moonlight_bin": "",         # "" = auto: Beam fork, then system, then snap
+    "show_pill": True,           # in-stream Beam pill (fork only)
 }
 
 

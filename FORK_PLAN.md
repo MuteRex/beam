@@ -129,10 +129,29 @@ easy.
   backends; test on the EGL renderer (default on this RX 9060 XT / RADV) first.
 - GPL-3.0: keep the fork's source available; Beam stays GPL-3.0 too.
 
-## Quick resume checklist for the new session
-- [ ] (opt) free disk to >25 GB
-- [ ] Phase 1 pkexec apt install
-- [ ] Phase 2 `qmake6 && make -j release`, smoke-test `app/moonlight`
-- [ ] branch `beam-overlay`
-- [ ] Phase 3 overlay pill (overlaymanager + mouse.cpp + input)
-- [ ] Phase 4 point Beam at the built binary
+## Quick resume checklist
+- [x] Phase 1 toolchain installed (2026-10-04, disk had 40 GB free)
+- [x] Phase 2 baseline built; pairing copied from snap config to
+      `~/.config/Moonlight Game Streaming Project/Moonlight.conf`
+- [x] branch `beam-overlay` (commit b788c11)
+- [x] Phase 3 overlay pill — built, streams cleanly on EGL/VAAPI;
+      **click-through not yet verified by hand**
+- [x] Phase 4 Beam auto-uses `~/beam-moonlight/app/moonlight`; Settings has
+      binary path + "In-stream Beam button" switch (BEAM_HIDE_PILL)
+- [ ] Hand-test: pill click, menu items, Ctrl+Alt+Shift+B in Game mode,
+      fullscreen toggle re-placement
+- [ ] Phase 5 polish (fade, position option, upstream rebase)
+
+## Phase 3 as built (2026-10-04)
+- `OverlayControls` type; `OverlayManager::updateOverlaySurface()` (custom
+  surface, kept and re-pushed to new renderers), `placeTopCenterOverlay()`
+  (renderers call it; records drawn rect), `windowPointToOverlay()` (scales
+  window points to drawable px for hit-testing).
+- `app/streaming/input/controls.cpp`: layout/drawing (Ubuntu-M font, lime
+  #9ae600 on #1b1b1b), hit-test, menu state. Items call existing KeyCombo
+  handlers. Pill clickable in Desktop mouse mode or when uncaptured; in Game
+  mode use Ctrl+Alt+Shift+B, which releases relative capture while the menu is
+  open and restores it on close. Clicks on pill/menu never reach the host;
+  held buttons are released to the host when the menu opens.
+- Only enabled on Linux (Win/mac renderers have no placement branch).
+- Rebuild: `cd ~/beam-moonlight && make -j$(nproc) release`
