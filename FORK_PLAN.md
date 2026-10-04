@@ -155,3 +155,17 @@ easy.
   held buttons are released to the host when the menu opens.
 - Only enabled on Linux (Win/mac renderers have no placement branch).
 - Rebuild: `cd ~/beam-moonlight && make -j$(nproc) release`
+
+## Status 2026-10-05 (end of session)
+Done since: pill redesign (idle handle, real cursor), paced keystroke paste,
+3-level stats panel, local/automatic discovery, Advanced settings page,
+latency bench + Test connection, host GPU encoder fix (Intel VAAPI driver).
+
+Next (resume here):
+1. Laptop: install updated `host/beam-virtual-display.sh` (5f2ec8c) so streams
+   switch to the 120 Hz virtual display — serve with
+   `cd ~/beam/host && python3 -m http.server 8765`, then on the laptop:
+   `curl -fsSL http://192.168.68.210:8765/beam-virtual-display.sh -o /tmp/bvd.sh && sudo bash /tmp/bvd.sh install && systemctl --user restart app-dev.lizardbyte.app.Sunshine.service`
+2. Verify over SSH that Sunshine captures HDMI-1 at 120 Hz; re-run
+   `python3 -m beam.bench 192.168.68.117` and compare.
+3. Live-check the pill handle/cursor and stats levels in a real stream.
