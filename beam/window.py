@@ -288,7 +288,8 @@ class BeamWindow(Adw.ApplicationWindow):
         sec1.append("Show all devices", "win.show-all")
         menu.append_section(None, sec1)
         sec2 = Gio.Menu()
-        sec2.append("Stream settings…", "win.settings")
+        sec2.append("Settings…", "win.settings")
+        sec2.append("Advanced settings…", "win.advanced-settings")
         sec2.append("Refresh", "win.refresh")
         menu.append_section(None, sec2)
         sec3 = Gio.Menu()
@@ -299,6 +300,7 @@ class BeamWindow(Adw.ApplicationWindow):
 
     def _install_actions(self):
         for name, cb in (("settings", self._open_settings),
+                         ("advanced-settings", self._open_advanced_settings),
                          ("about", self._open_about),
                          ("refresh", lambda *_: self.refresh())):
             a = Gio.SimpleAction.new(name, None)
@@ -577,6 +579,12 @@ class BeamWindow(Adw.ApplicationWindow):
     def _open_settings(self, *_):
         from .settings import SettingsDialog
         SettingsDialog(self).present(self)
+
+    def _open_advanced_settings(self, *_):
+        from .settings import SettingsDialog
+        dlg = SettingsDialog(self)
+        dlg.set_visible_page(dlg.advanced_page)
+        dlg.present(self)
 
     def _open_about(self, *_):
         Adw.AboutDialog(

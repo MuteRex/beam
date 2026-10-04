@@ -19,6 +19,7 @@ class BeamApp(Adw.Application):
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
 
     def do_activate(self):
+        self.set_accels_for_action("win.settings", ["<Control>comma"])
         win = self.props.active_window or BeamWindow(self)
         win.present()
 
