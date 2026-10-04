@@ -245,6 +245,11 @@ class BeamWindow(Adw.ApplicationWindow):
         self.mode_box.append(self._fs_btn)
         self.mode_box.append(self._win_btn)
         header.pack_end(self._pill_menu_button())
+        settings_btn = Gtk.Button(icon_name="emblem-system-symbolic",
+                                  tooltip_text="Settings (Ctrl+,)",
+                                  action_name="win.settings")
+        settings_btn.add_css_class("raised")
+        header.pack_end(settings_btn)
         header.pack_end(self.mode_box)
 
         refresh = Gtk.Button(icon_name="view-refresh-symbolic",
