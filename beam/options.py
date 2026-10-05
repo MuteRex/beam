@@ -90,6 +90,22 @@ def valid_resolution(text: str) -> bool:
     return bool(_RESOLUTION.match((text or "").strip()))
 
 
+def effective_resolution(config: dict) -> str:
+    """Custom resolution when valid, otherwise the General preset ("" = auto)."""
+    custom = (config.get("custom_resolution") or "").strip()
+    if valid_resolution(custom):
+        return custom
+    return (config.get("resolution") or "").strip()
+
+
+def resolution_size(config: dict) -> tuple[int, int]:
+    res = effective_resolution(config)
+    if not valid_resolution(res):
+        return 1920, 1080
+    w, h = res.split("x")
+    return int(w), int(h)
+
+
 def effective_fps(config: dict) -> int:
     """Custom frame rate when set, otherwise the General preset."""
     custom = int(config.get("custom_fps") or 0)

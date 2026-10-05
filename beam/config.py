@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 from .options import DEFAULTS as ADVANCED_DEFAULTS
@@ -36,22 +37,44 @@ DEFAULTS = {
 }
 
 
+def _coerce(key: str, value):
+    """`value` if it has the same type as the default, else the default. A
+    hand-edited or old config must never crash the app or reach the command line
+    as the wrong type."""
+    default = DEFAULTS[key]
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else default
+    if isinstance(default, int):
+        return value if isinstance(value, int) and not isinstance(value, bool) else default
+    if isinstance(default, str):
+        return value if isinstance(value, str) else default
+    return default
+
+
 def load() -> dict:
-    cfg = dict(DEFAULTS)
     saved = {}
     try:
         saved = json.loads(CONFIG_PATH.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+    except (OSError, ValueError):
         pass
-    cfg.update(saved)
+    if not isinstance(saved, dict):
+        saved = {}
+    cfg = {k: _coerce(k, saved[k]) if k in saved else DEFAULTS[k] for k in DEFAULTS}
     # Old boolean overlay switch → stats level
     if "stats_level" not in saved and saved.get("performance_overlay"):
         cfg["stats_level"] = "standard"
-    # keep only known keys, backfill new ones
-    return {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
+    return cfg
 
 
 def save(cfg: dict) -> None:
+    """Atomic, owner-only write: a crash mid-save can't leave a corrupt file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    clean = {k: cfg.get(k, DEFAULTS[k]) for k in DEFAULTS}
-    CONFIG_PATH.write_text(json.dumps(clean, indent=2))
+    clean = {k: _coerce(k, cfg.get(k, DEFAULTS[k])) for k in DEFAULTS}
+    fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, prefix=".config-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(clean, f, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+    except BaseException:
+        os.unlink(tmp)
+        raise

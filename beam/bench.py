@@ -13,6 +13,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,38 @@ STAT_PATTERNS = {
     "queue_ms": r"Average frame queue delay: ([\d.]+)",
     "render_ms": r"Average rendering time \(including monitor V-sync latency\): ([\d.]+)",
 }
+
+
+# Child processes still running, so the app can stop them if it quits mid-test
+# (the test runs on a daemon thread, which would otherwise leave them behind)
+_children: set[subprocess.Popen] = set()
+_children_lock = threading.Lock()
+
+
+def _spawn(argv: list[str], **kwargs) -> subprocess.Popen:
+    proc = subprocess.Popen(argv, **kwargs)
+    with _children_lock:
+        _children.add(proc)
+    return proc
+
+
+def _reap(proc: subprocess.Popen) -> None:
+    with _children_lock:
+        _children.discard(proc)
+
+
+def terminate_all() -> None:
+    with _children_lock:
+        procs = list(_children)
+    for proc in procs:
+        if proc.poll() is None:
+            proc.terminate()
+    for proc in procs:
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        _reap(proc)
 
 
 @dataclass
@@ -79,7 +112,7 @@ class HeadlessCompositor:
 
     def __enter__(self):
         runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-        self.proc = subprocess.Popen(
+        self.proc = _spawn(
             ["weston", "--backend=headless", "--renderer=gl",
              f"--width={self.width}", f"--height={self.height}",
              f"--socket={self.socket}", "--idle-time=0"],
@@ -93,9 +126,16 @@ class HeadlessCompositor:
         raise RuntimeError("headless weston did not start (is weston installed?)")
 
     def __exit__(self, *_):
-        if self.proc and self.proc.poll() is None:
+        if self.proc is None:
+            return
+        if self.proc.poll() is None:
             self.proc.terminate()
-            self.proc.wait(timeout=5)
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+        _reap(self.proc)
 
     def env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -108,7 +148,7 @@ class HeadlessCompositor:
 def run_case(binary: str, host: str, app: str, case: Case, seconds: int,
              compositor: HeadlessCompositor) -> Result:
     with tempfile.NamedTemporaryFile("w+", suffix=".log") as log:
-        proc = subprocess.Popen(
+        proc = _spawn(
             [binary, "stream", "--display-mode", "fullscreen", *case.args, "--", host, app],
             stdout=log, stderr=subprocess.STDOUT, env=compositor.env())
         try:
@@ -124,6 +164,7 @@ def run_case(binary: str, host: str, app: str, case: Case, seconds: int,
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+        _reap(proc)
         log.seek(0)
         text = log.read()
 

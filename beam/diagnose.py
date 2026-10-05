@@ -6,10 +6,9 @@ from __future__ import annotations
 
 import re
 import subprocess
-import urllib.request
 from dataclasses import dataclass, field
 
-from . import bench, options
+from . import bench, options, probe
 
 # Bits of Sunshine's ServerCodecModeSupport
 SCM_H264 = 0x00001
@@ -38,8 +37,10 @@ class Report:
 
 def _ping(address: str) -> tuple[float, float, float] | None:
     """(avg ms, jitter ms, loss %) over 20 quick pings."""
+    if not probe.valid_address(address):
+        return None
     try:
-        out = subprocess.run(["ping", "-c", "20", "-i", "0.2", "-q", address],
+        out = subprocess.run(["ping", "-c", "20", "-i", "0.2", "-q", "--", address],
                              capture_output=True, text=True, timeout=15).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -51,15 +52,11 @@ def _ping(address: str) -> tuple[float, float, float] | None:
 
 
 def _host_codecs(address: str) -> set[str] | None:
-    try:
-        with urllib.request.urlopen(f"http://{address}:47989/serverinfo", timeout=4) as r:
-            xml = r.read(65536).decode("utf-8", "replace")
-    except (OSError, ValueError):
+    info = probe.server_info(address, timeout=4)
+    mask = (info or {}).get("ServerCodecModeSupport", "")
+    if not mask.isdigit():
         return None
-    m = re.search(r"<ServerCodecModeSupport>(\d+)<", xml)
-    if not m:
-        return None
-    mask = int(m.group(1))
+    mask = int(mask)
     codecs = set()
     if mask & SCM_H264:
         codecs.add("H.264")
@@ -105,7 +102,7 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
     flags = [a for a in options.cli_args(cfg) if a not in ("--quit-after",)]
     case = bench.Case("current settings", launcher.video_args() + flags)
     try:
-        with bench.HeadlessCompositor(*_resolution(cfg)) as comp:
+        with bench.HeadlessCompositor(*options.resolution_size(cfg)) as comp:
             result = bench.run_case(launcher.bin, address, app, case, seconds, comp)
     except RuntimeError as e:
         report.error = str(e)
@@ -160,12 +157,3 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
         report.advice.append("Everything is within the normal range for a LAN stream.")
     return report
 
-
-def _resolution(cfg) -> tuple[int, int]:
-    try:
-        res = cfg.get("custom_resolution") if options.valid_resolution(cfg.get("custom_resolution", "")) \
-            else cfg.get("resolution")
-        w, h = (int(v) for v in (res or "1920x1080").split("x"))
-        return w, h
-    except ValueError:
-        return 1920, 1080

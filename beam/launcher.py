@@ -12,7 +12,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
-from . import options
+from . import options, probe
 
 
 # Self-built Moonlight fork with the in-stream Beam pill (see FORK_PLAN.md)
@@ -51,10 +51,7 @@ class MoonlightLauncher:
         """Options that shape the video pipeline (shared with the benchmark)."""
         c = self.config
         args = []
-        res = (c.get("resolution") or "").strip()
-        custom = (c.get("custom_resolution") or "").strip()
-        if options.valid_resolution(custom):
-            res = custom
+        res = options.effective_resolution(c)
         if res:
             args += ["--resolution", res]
         args += ["--fps", str(options.effective_fps(c))]
@@ -104,6 +101,8 @@ class MoonlightLauncher:
     def stream(self, address: str, app: str | None = None,
                display_pos: tuple[int, int] | None = None) -> list[str]:
         """Launch a stream detached; returns the argv used (for logging)."""
+        if not probe.valid_address(address):
+            raise ValueError(f"not a valid host address: {address!r}")
         app = app or self.config.get("default_app") or "Desktop"
         args = self._stream_args(address, app)
         launcher = Gio.SubprocessLauncher.new(
@@ -122,6 +121,8 @@ class MoonlightLauncher:
 
     def pair(self, address: str, pin: str) -> tuple[bool, str]:
         """Blocking pair. Run off the main thread. Returns (ok, message)."""
+        if not probe.valid_address(address):
+            return False, "Not a valid host address."
         try:
             out = subprocess.run(
                 [self.bin, "pair", "--pin", pin, "--", address],
@@ -138,6 +139,8 @@ class MoonlightLauncher:
 
     def list_apps(self, address: str) -> list[str]:
         """Blocking app list. Run off the main thread."""
+        if not probe.valid_address(address):
+            return []
         try:
             out = subprocess.run(
                 [self.bin, "list", "--", address],

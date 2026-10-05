@@ -40,8 +40,13 @@ import gi
 from gi.repository import Gio, GLib
 
 target, dry_run = sys.argv[1], "--dry-run" in sys.argv
-# Layout from before the stream, restored afterwards
-state = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "beam-virtual-display.layout")
+# Layout from before the stream, restored afterwards. Only in the user's private
+# runtime dir: a fixed name in shared /tmp could be pre-planted as a symlink.
+runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+st = os.stat(runtime) if os.path.isdir(runtime) else None
+if st is None or st.st_uid != os.getuid() or st.st_mode & 0o077:
+    sys.exit(f"beam-virtual-display: no private runtime dir ({runtime}); not changing the layout")
+state = os.path.join(runtime, "beam-virtual-display.layout")
 bus = Gio.bus_get_sync(Gio.BusType.SESSION)
 
 def call(method, args=None):
@@ -155,6 +160,11 @@ turn_off() {
 case "${1:-status}" in
 install)
     need_root
+    # Installs a copy of this file, so it must be run from one (not piped to bash)
+    if [ ! -f "$0" ] || ! grep -q "^# Beam virtual display:" "$0"; then
+        echo "Run install from the downloaded file: sudo bash beam-virtual-display.sh install" >&2
+        exit 1
+    fi
     mkdir -p "$(dirname "$EDID_PATH")"
     echo "$EDID_B64" | base64 -d > "$EDID_PATH"
     install -m 0755 "$0" "$SELF"

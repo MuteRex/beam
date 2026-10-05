@@ -7,6 +7,8 @@ and it is always the shortest path.
 """
 from __future__ import annotations
 
+import socket
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 from gi.repository import Gio, GLib
@@ -67,7 +69,8 @@ def browse(timeout: float = 2.0) -> list[tuple[str, str, int]]:
             except GLib.Error:
                 continue
             address, port = r[7], r[8]
-            if address and address not in seen:
+            # Anyone on the LAN can announce a service; only take a plain IP
+            if probe.valid_address(address) and address not in seen:
                 seen.add(address)
                 found.append((name, address, port))
         return found
@@ -77,7 +80,6 @@ def browse(timeout: float = 2.0) -> list[tuple[str, str, int]]:
 
 def _own_addresses() -> set[str]:
     """This machine's IPv4 addresses, so we don't list ourselves."""
-    import socket
     own = {"127.0.0.1"}
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
@@ -85,7 +87,6 @@ def _own_addresses() -> set[str]:
     except OSError:
         pass
     try:
-        import subprocess
         out = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True, text=True, timeout=3).stdout
         for line in out.splitlines():
             parts = line.split()

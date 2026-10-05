@@ -114,7 +114,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.bin.set_text(self.config.get("moonlight_bin", ""))
         self.bin.connect("changed", self._update_bin_status)
         client.add(self.bin)
-        self.bin_status = Adw.ActionRow(title="In use")
+        self.bin_status = Adw.ActionRow(title="In use", use_markup=False)
         self.bin_status.add_css_class("property")
         client.add(self.bin_status)
         self.pill = Adw.SwitchRow(
@@ -235,4 +235,3 @@ class SettingsDialog(Adw.PreferencesDialog):
             self.config[o.key] = self._option_value(o)
         self.config["show_pill"] = self.pill.get_active()
         cfg.save(self.config)
-        self.window.launcher.config = self.config

@@ -8,6 +8,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
 
+from . import __version__  # noqa: E402
 from . import config as cfg  # noqa: E402
 from . import probe  # noqa: E402
 from .launcher import MoonlightLauncher  # noqa: E402
@@ -186,6 +187,7 @@ class BeamWindow(Adw.ApplicationWindow):
         self.providers = {p.id: p() for p in ALL_PROVIDERS}
         self._hosts_by_id: dict[str, Host] = {}
         self._all_hosts: list[Host] = []
+        self._refresh_gen = 0  # newest refresh wins; slower old ones are dropped
 
         # force dark, Parsec-like
         Adw.StyleManager.get_default().set_color_scheme(
@@ -342,7 +344,6 @@ class BeamWindow(Adw.ApplicationWindow):
         mode = "fullscreen" if self._fs_btn.get_active() else "windowed"
         self.config["display_mode"] = mode
         cfg.save(self.config)
-        self.launcher.config = self.config
 
     def _on_show_all(self, action, value):
         action.set_state(value)
@@ -355,7 +356,6 @@ class BeamWindow(Adw.ApplicationWindow):
         action.set_state(param)
         self.config["mouse_mode"] = mode
         cfg.save(self.config)
-        self.launcher.config = self.config
         self._toast(f"Mouse: {'cursor free' if mode == 'desktop' else 'cursor locked'}")
 
     # ---- refresh --------------------------------------------------------
@@ -367,20 +367,26 @@ class BeamWindow(Adw.ApplicationWindow):
                               provider.unavailable_message)
             return
         self.stack.set_visible_child_name("loading")
+        self._refresh_gen += 1
+        gen = self._refresh_gen
 
         def work():
-            err = provider.readiness_error()
             hosts = []
-            if not err:
-                hosts = provider.list_hosts()
-                probe.mark_hostable(hosts)
-                probe.mark_direct(provider, hosts)
-            GLib.idle_add(self._on_hosts, provider, hosts, err)
+            try:
+                err = provider.readiness_error()
+                if not err:
+                    hosts = provider.list_hosts()
+                    probe.mark_hostable(hosts)
+                    probe.mark_direct(provider, hosts)
+            except Exception as e:  # noqa: BLE001 - shown to the user instead of a stuck spinner
+                err = str(e) or type(e).__name__
+            GLib.idle_add(self._on_hosts, gen, provider, hosts, err)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_hosts(self, provider, hosts, err):
-        self._provider_err = err
+    def _on_hosts(self, gen, provider, hosts, err):
+        if gen != self._refresh_gen:
+            return False  # a newer refresh (or provider switch) superseded this one
         self._all_hosts = hosts
         if err:
             self._show_status("dialog-warning-symbolic",
@@ -418,7 +424,8 @@ class BeamWindow(Adw.ApplicationWindow):
     def _show_status(self, icon, title, desc):
         self.status_page.set_icon_name(icon)
         self.status_page.set_title(title)
-        self.status_page.set_description(desc)
+        # Descriptions are markup and can carry host or tool output
+        self.status_page.set_description(GLib.markup_escape_text(desc))
         self.status_page.set_child(None)
         self.stack.set_visible_child_name("status")
 
@@ -479,14 +486,16 @@ class BeamWindow(Adw.ApplicationWindow):
         def show(report):
             page = Adw.PreferencesPage()
             if report.error:
-                err = Adw.PreferencesGroup(title="Test failed", description=report.error)
+                err = Adw.PreferencesGroup(title="Test failed",
+                                           description=GLib.markup_escape_text(report.error))
                 page.add(err)
             if report.metrics:
                 group = Adw.PreferencesGroup(
                     title="Measured",
-                    description=f"{address} · targets are typical for a healthy LAN stream")
+                    description=GLib.markup_escape_text(
+                        f"{address} · targets are typical for a healthy LAN stream"))
                 for m in report.metrics:
-                    row = Adw.ActionRow(title=m.label, subtitle=m.target)
+                    row = Adw.ActionRow(title=m.label, subtitle=m.target, use_markup=False)
                     value = Gtk.Label(label=m.value)
                     value.add_css_class(f"diag-{m.rating}")
                     row.add_suffix(value)
@@ -516,10 +525,14 @@ class BeamWindow(Adw.ApplicationWindow):
         dlg.present(self)
 
     def _pair_dialog(self, host: Host):
+        address = self.launcher.address_for(host)
         dlg = Adw.AlertDialog(
             heading=f"Pair with {host.name}",
-            body=("Pick a 4-digit PIN, then enter the SAME PIN in Sunshine on "
-                  f"the host (web UI at https://{host.address}:47990 → PIN)."))
+            body=(f"Pairing with {address}.\n\n"
+                  "Pick a 4-digit PIN, then enter the SAME PIN in Sunshine on "
+                  f"the host (web UI at https://{address}:47990 → PIN). Only pair "
+                  "with a machine you control: a paired host receives your "
+                  "keyboard, mouse and pasted clipboard."))
         entry = Gtk.Entry(max_length=4, input_purpose=Gtk.InputPurpose.DIGITS,
                           placeholder_text="e.g. 1234", margin_top=8,
                           margin_start=12, margin_end=12)
@@ -539,7 +552,7 @@ class BeamWindow(Adw.ApplicationWindow):
             self._toast(f"Pairing… enter {pin} in Sunshine on {host.name}.")
 
             def work():
-                ok, msg = self.launcher.pair(self.launcher.address_for(host), pin)
+                ok, msg = self.launcher.pair(address, pin)
                 GLib.idle_add(self._toast,
                               f"Paired with {host.name}." if ok
                               else f"Pairing failed: {msg or 'see Sunshine'}")
@@ -575,8 +588,12 @@ class BeamWindow(Adw.ApplicationWindow):
         def on_resp(_d, resp):
             if resp == "go":
                 app = apps[drop.get_selected()]
-                self.launcher.stream(self.launcher.address_for(host), app, display_pos=self._monitor_pos())
-                self._toast(f"Streaming {app} from {host.name}…")
+                try:
+                    self.launcher.stream(self.launcher.address_for(host), app,
+                                         display_pos=self._monitor_pos())
+                    self._toast(f"Streaming {app} from {host.name}…")
+                except Exception as e:  # noqa: BLE001
+                    self._toast(f"Launch failed: {e}")
         dlg.connect("response", on_resp)
         dlg.present(self)
 
@@ -593,11 +610,13 @@ class BeamWindow(Adw.ApplicationWindow):
 
     def _open_about(self, *_):
         Adw.AboutDialog(
-            application_name="Beam", developer_name="Simon", version="0.2",
+            application_name="Beam", developer_name="Simon", version=__version__,
             comments=("A Parsec-style front-end for Moonlight + Sunshine.\n"
                       "Discovery is pluggable — Tailscale now, self-hosted later."),
             license_type=Gtk.License.GPL_3_0).present(self)
 
     def _toast(self, text):
-        self.toasts.add_toast(Adw.Toast.new(text))
+        toast = Adw.Toast.new(text)
+        toast.set_use_markup(False)  # host names come from the network
+        self.toasts.add_toast(toast)
         return False

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 
+from .. import probe
 from .base import DiscoveryProvider, Host
 
 
@@ -42,11 +43,9 @@ class TailscaleProvider(DiscoveryProvider):
         self._bin = shutil.which("tailscale") or "/usr/bin/tailscale"
 
     def readiness_error(self):
-        if not shutil.which(self._bin) and not self._bin.startswith("/"):
-            return "Tailscale is not installed."
         try:
             self._status()
-        except FileNotFoundError:
+        except OSError:
             return "Tailscale is not installed."
         except RuntimeError as e:
             return str(e)
@@ -59,13 +58,17 @@ class TailscaleProvider(DiscoveryProvider):
                 capture_output=True, text=True, timeout=8,
             )
         except subprocess.TimeoutExpired:
-            raise RuntimeError("Tailscale did not respond.")
+            raise RuntimeError("Tailscale did not respond.") from None
         if out.returncode != 0:
             msg = (out.stderr or out.stdout).strip() or "tailscale status failed"
             if "Logged out" in msg or "NeedsLogin" in msg:
                 raise RuntimeError("Tailscale is logged out. Run: tailscale up")
             raise RuntimeError(msg.splitlines()[0])
-        return json.loads(out.stdout)
+        try:
+            data = json.loads(out.stdout)
+        except ValueError:
+            raise RuntimeError("Tailscale returned unreadable status.") from None
+        return data if isinstance(data, dict) else {}
 
     def list_hosts(self) -> list[Host]:
         data = self._status()
@@ -76,7 +79,7 @@ class TailscaleProvider(DiscoveryProvider):
                 continue
             ips = peer.get("TailscaleIPs") or []
             addr = ips[0] if ips else (peer.get("DNSName") or "").rstrip(".")
-            if not addr:
+            if not probe.valid_address(addr):
                 continue
             online = bool(peer.get("Online"))
             hostname = peer.get("HostName") or ""
@@ -101,9 +104,11 @@ class TailscaleProvider(DiscoveryProvider):
     def direct_address(self, host: Host) -> str:
         """The peer's LAN IP when Tailscale reaches it directly over a private
         network ("pong ... via 192.168.x.y:41641"); "" if relayed or unknown."""
+        if not probe.valid_address(host.address):
+            return ""
         try:
             out = subprocess.run(
-                [self._bin, "ping", "-c", "1", "--timeout", "2s", host.address],
+                [self._bin, "ping", "-c", "1", "--timeout", "2s", "--", host.address],
                 capture_output=True, text=True, timeout=5,
             )
         except (OSError, subprocess.TimeoutExpired):
