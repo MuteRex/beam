@@ -2,8 +2,8 @@
 compositor (real EGL + VAAPI path, nothing on screen) and collects Moonlight's
 end-of-session stats.
 
-    python3 -m beam.bench 192.168.68.117                 # default matrix
-    python3 -m beam.bench 192.168.68.117 --seconds 30 --only codec
+    python3 -m beam.bench <host>                 # default matrix
+    python3 -m beam.bench <host> --seconds 30 --only codec
 """
 from __future__ import annotations
 
