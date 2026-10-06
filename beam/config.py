@@ -33,6 +33,10 @@ DEFAULTS = {
     "frame_pacing": False,       # on = smoother, adds up to a frame
     "stats_level": "off",        # off / basic / standard / advanced
     "prefer_lan": True,          # use the LAN IP when Tailscale is direct
+    # Learned per host from the end-of-stream stats: {host key: {"fps", "name"}}
+    # for hosts that delivered fewer frames than asked (their screen's refresh)
+    "host_fps": {},
+    "fps_warning_muted": [],     # host keys: "Don't show again" on the fps warning
     **ADVANCED_DEFAULTS,         # Settings → Advanced (see options.py)
 }
 
@@ -48,6 +52,14 @@ def _coerce(key: str, value):
         return value if isinstance(value, int) and not isinstance(value, bool) else default
     if isinstance(default, str):
         return value if isinstance(value, str) else default
+    if key == "host_fps" and isinstance(value, dict):
+        return {k: {"fps": v["fps"], "name": v.get("name", "") if isinstance(v.get("name"), str) else ""}
+                for k, v in value.items()
+                if isinstance(k, str) and isinstance(v, dict)
+                and isinstance(v.get("fps"), int) and not isinstance(v.get("fps"), bool)
+                and 1 <= v["fps"] <= 1000}
+    if key == "fps_warning_muted" and isinstance(value, list):
+        return [k for k in value if isinstance(k, str)]
     return default
 
 

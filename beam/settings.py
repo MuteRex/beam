@@ -41,10 +41,11 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._row(video, "Resolution", self.res)
 
         self.fps = _combo(FPS, str(self.config.get("fps")))
-        fps_row = self._row(video, "Frame rate (FPS)", self.fps)
-        custom_fps = int(self.config.get("custom_fps") or 0)
-        if custom_fps > 0:
-            fps_row.set_subtitle(f"Overridden by Advanced → Custom frame rate ({custom_fps})")
+        self.fps_row = self._row(video, "Frame rate (FPS)", self.fps)
+        self.fps_row.set_use_markup(False)  # names hosts, which come from the network
+        self.fps_row.set_subtitle_lines(0)
+        self.fps.connect("notify::selected", self._update_fps_note)
+        self._update_fps_note()
 
         self.bitrate = Adw.SpinRow(
             title="Bitrate (Mbps, 0 = auto)",
@@ -55,6 +56,11 @@ class SettingsDialog(Adw.PreferencesDialog):
 
         self.display = _combo(DISPLAY, self.config.get("display_mode"))
         self._row(video, "Display mode", self.display)
+
+        self.unmute = Adw.ButtonRow(title="Show refresh-rate warnings again")
+        self.unmute.set_sensitive(bool(self.config.get("fps_warning_muted")))
+        self.unmute.connect("activated", self._unmute_fps_warnings)
+        video.add(self.unmute)
 
         latency = Adw.PreferencesGroup(
             title="Latency",
@@ -127,6 +133,26 @@ class SettingsDialog(Adw.PreferencesDialog):
         advanced.add(self._reset_group)
 
         self.connect("closed", self._save)
+
+    def _update_fps_note(self, *_):
+        custom = int(self.config.get("custom_fps") or 0)
+        fps = custom if custom > 0 else int(FPS[self.fps.get_selected()])
+        notes = []
+        if custom > 0:
+            notes.append(f"Overridden by Advanced → Custom frame rate ({custom}).")
+        if fps > 60:
+            notes.append("Above 60 fps only helps if the host’s screen runs that fast.")
+            slower = sorted({f"{v['name'] or 'a host'} (about {v['fps']})"
+                             for v in self.config.get("host_fps", {}).values() if v["fps"] < fps})
+            if slower:
+                notes.append("Delivered less last time: " + ", ".join(slower) + ".")
+        self.fps_row.set_subtitle(" ".join(notes))
+
+    def _unmute_fps_warnings(self, *_):
+        self.config["fps_warning_muted"] = []
+        cfg.save(self.config)
+        self.unmute.set_sensitive(False)
+        self.add_toast(Adw.Toast.new("Refresh-rate warnings will show again"))
 
     def _update_bin_status(self, *_):
         path = resolve_moonlight_bin(self.bin.get_text())

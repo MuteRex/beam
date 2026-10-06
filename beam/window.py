@@ -10,8 +10,8 @@ from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
 
 from . import __version__  # noqa: E402
 from . import config as cfg  # noqa: E402
-from . import probe  # noqa: E402
-from .launcher import DESKTOP_APP, MoonlightLauncher  # noqa: E402
+from . import options, probe  # noqa: E402
+from .launcher import DESKTOP_APP, MoonlightLauncher, host_refresh_limit  # noqa: E402
 from .providers import ALL_PROVIDERS, Host  # noqa: E402
 
 OS_ICON = {
@@ -63,6 +63,8 @@ CSS = b"""
 .pill-btn { border-radius: 999px; padding: 3px; }
 
 /* Beam lime instead of the default accent blue */
+button.suggested, button.suggested-action { background: #9ae600; color: #0c0c0c; }
+button.suggested:hover, button.suggested-action:hover { background: #aef31a; }
 switch:checked { background-color: #9ae600; }
 switch:checked > slider { background-color: #0c0c0c; }
 
@@ -98,6 +100,12 @@ def route_chips(host: Host):
         chip.add_css_class(css)
         box.append(chip)
     return box
+
+
+def host_key(host: Host) -> str:
+    """Stable per-machine key: Sunshine's id when known (same across LAN and
+    Tailscale), else the provider's id."""
+    return host.extra.get("uniqueid") or host.id
 
 
 class HostCard(Gtk.Box):
@@ -431,24 +439,75 @@ class BeamWindow(Adw.ApplicationWindow):
 
     # ---- host actions ---------------------------------------------------
     def on_connect(self, host: Host):
-        if self._start_stream(host):
-            disp = self.config.get("display_mode", "fullscreen")
-            mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
-                else "cursor locked"
-            self._toast(f"Connecting to {host.name} · {disp} · {mouse}…")
+        def go():
+            if self._start_stream(host):
+                disp = self.config.get("display_mode", "fullscreen")
+                mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
+                    else "cursor locked"
+                self._toast(f"Connecting to {host.name} · {disp} · {mouse}…")
+        self._confirm_fps(host, go)
+
+    def _confirm_fps(self, host: Host, proceed):
+        """Warn before streaming faster than this host has delivered. The dialog
+        stays until a choice is made (Escape counts as Cancel)."""
+        key = host_key(host)
+        known = self.config.get("host_fps", {}).get(key)
+        fps = options.effective_fps(self.config)
+        if not known or fps <= known["fps"] or key in self.config.get("fps_warning_muted", []):
+            proceed()
+            return
+        dlg = Adw.AlertDialog(
+            heading=f"{host.name} can only send about {known['fps']} fps",
+            body=(f"You chose {fps} fps, but the last stream from {host.name} "
+                  f"delivered about {known['fps']}, which is usually the refresh "
+                  "rate of its screen. The stream will run at that rate.\n\n"
+                  "Lower the frame rate in Settings, or continue anyway."))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("mute", "Don’t show again for this host")
+        dlg.add_response("continue", "Continue")
+        dlg.set_response_appearance("continue", Adw.ResponseAppearance.SUGGESTED)
+        dlg.set_default_response("continue")
+        dlg.set_close_response("cancel")
+
+        def on_resp(_d, resp):
+            if resp == "mute":
+                self.config["fps_warning_muted"] = [*self.config.get("fps_warning_muted", []), key]
+                cfg.save(self.config)
+            if resp in ("mute", "continue"):
+                proceed()
+        dlg.connect("response", on_resp)
+        dlg.present(self)
 
     def _start_stream(self, host: Host, app: str | None = None) -> bool:
         address = self.launcher.address_for(host)
+        requested = options.effective_fps(self.config)
         try:
             self.launcher.stream(address, app, display_pos=self._monitor_pos(),
                                  host_name=host.name,
-                                 on_exit=lambda r: self._on_stream_end(r))
+                                 on_exit=lambda r: self._on_stream_end(r, host, requested))
             return True
         except Exception as e:  # noqa: BLE001
             self._toast(f"Launch failed: {e}")
             return False
 
-    def _on_stream_end(self, result):
+    def _learn_host_fps(self, host: Host, delivered, requested: int):
+        """Remember a host that can't keep up with the frame rate asked for (its
+        screen's refresh rate), and forget it once it does."""
+        key = host_key(host)
+        known = dict(self.config.get("host_fps", {}))
+        limit = host_refresh_limit(delivered, requested)
+        if limit is not None:
+            known[key] = {"fps": limit, "name": host.name}
+        elif delivered and delivered >= requested * 0.9 and key in known \
+                and requested > known[key]["fps"]:
+            del known[key]  # it now delivers more (e.g. a virtual display was set up)
+        else:
+            return
+        self.config["host_fps"] = known
+        cfg.save(self.config)
+
+    def _on_stream_end(self, result, host: Host, requested: int):
+        self._learn_host_fps(host, result.delivered_fps, requested)
         if result.message:
             self._toast(result.message)
         if result.app != DESKTOP_APP:
@@ -612,8 +671,10 @@ class BeamWindow(Adw.ApplicationWindow):
         def on_resp(_d, resp):
             if resp == "go":
                 app = apps[drop.get_selected()]
-                if self._start_stream(host, app):
-                    self._toast(f"Streaming {app} from {host.name}…")
+                def go():
+                    if self._start_stream(host, app):
+                        self._toast(f"Streaming {app} from {host.name}…")
+                self._confirm_fps(host, go)
         dlg.connect("response", on_resp)
         dlg.present(self)
 

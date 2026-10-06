@@ -38,6 +38,21 @@ class StreamResult:
     log_path: Path
     clean: bool           # ended by the user, not by an error or a drop
     message: str          # one line for the user; "" when there's nothing to say
+    delivered_fps: float | None = None  # frames/s that arrived from the host
+
+
+# Common display refresh rates, for reading a host's limit off its frame rate
+REFRESH_RATES = (30, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 240)
+
+
+def host_refresh_limit(delivered: float | None, requested: int) -> int | None:
+    """The refresh rate a host is evidently capped at, or None if it kept up or
+    the reading is inconclusive (e.g. a mostly idle desktop sending few frames).
+    """
+    if not delivered or delivered >= requested * 0.9:
+        return None
+    rate = min(REFRESH_RATES, key=lambda r: abs(r - delivered))
+    return rate if abs(delivered - rate) <= rate * 0.08 and rate < requested else None
 
 
 # Moonlight log lines -> what to tell the user, in priority order
@@ -56,12 +71,16 @@ def read_result(address: str, app: str, log_path: Path, host_name: str = "") -> 
     except OSError:
         text = ""
     host = host_name or address
+    stats = text.split("Global video stats", 1)
+    fps = re.search(r"Incoming frame rate from network: ([\d.]+)", stats[1]) if len(stats) == 2 else None
+    delivered = float(fps.group(1)) if fps else None
     for pattern, message in _FAILURES:
         if re.search(pattern, text):
-            return StreamResult(address, app, log_path, False, message.format(host=host, app=app))
-    started = "Connection terminated" in text or "Global video stats" in text
+            return StreamResult(address, app, log_path, False, message.format(host=host, app=app),
+                                delivered)
+    started = "Connection terminated" in text or len(stats) == 2
     return StreamResult(address, app, log_path, True,
-                        f"Disconnected from {host}." if started else "")
+                        f"Disconnected from {host}." if started else "", delivered)
 
 
 def _new_log_path(address: str) -> Path:

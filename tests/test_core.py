@@ -20,7 +20,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 
 from beam import config, options, probe  # noqa: E402
-from beam.launcher import MoonlightLauncher, read_result  # noqa: E402
+from beam.launcher import MoonlightLauncher, host_refresh_limit, read_result  # noqa: E402
 from beam.providers.base import Host  # noqa: E402
 from beam.providers.tailscale import TailscaleProvider  # noqa: E402
 
@@ -59,6 +59,16 @@ class Config(unittest.TestCase):
         self.assertEqual(c["vsync"], config.DEFAULTS["vsync"])
         self.assertEqual(c["bitrate"], config.DEFAULTS["bitrate"])
         self.assertEqual(c["provider"], "local")
+
+    def test_host_fps_entries_are_sanitised(self):
+        config.CONFIG_PATH.write_text(json.dumps({
+            "host_fps": {"good": {"fps": 60, "name": "vivo"}, "bad": {"fps": "60"},
+                         "worse": [1], "huge": {"fps": 99999}, "noname": {"fps": 75, "name": 3}},
+            "fps_warning_muted": ["good", 5, None]}))
+        c = config.load()
+        self.assertEqual(c["host_fps"], {"good": {"fps": 60, "name": "vivo"},
+                                         "noname": {"fps": 75, "name": ""}})
+        self.assertEqual(c["fps_warning_muted"], ["good"])
 
     def test_non_dict_or_corrupt_file(self):
         for text in ("[1, 2]", "{not json", ""):
@@ -154,6 +164,29 @@ class StreamEnd(unittest.TestCase):
         game = launcher._stream_args("192.168.1.5", "Steam Big Picture")
         self.assertIn("--no-quit-after", game)
         self.assertNotIn("--quit-after", game)
+
+
+class RefreshLimit(unittest.TestCase):
+    def test_capped_hosts_are_recognised(self):
+        self.assertEqual(host_refresh_limit(59.8, 120), 60)
+        self.assertEqual(host_refresh_limit(74.6, 120), 75)
+        self.assertEqual(host_refresh_limit(119.5, 144), 120)
+
+    def test_kept_up_or_inconclusive(self):
+        self.assertIsNone(host_refresh_limit(119.0, 120))   # kept up
+        self.assertIsNone(host_refresh_limit(None, 120))    # no stats
+        self.assertIsNone(host_refresh_limit(4.2, 120))     # idle desktop, few frames
+        self.assertIsNone(host_refresh_limit(41.0, 120))    # slow encoder, not a refresh rate
+        self.assertIsNone(host_refresh_limit(59.9, 60))     # asked for 60, got 60
+
+    def test_delivered_fps_read_from_stats(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+            f.write("Incoming frame rate from network: 30.00\nGlobal video stats\n"
+                    "Incoming frame rate from network: 59.94\nConnection terminated: 0")
+        try:
+            self.assertEqual(read_result("h", "Desktop", Path(f.name)).delivered_fps, 59.94)
+        finally:
+            os.unlink(f.name)
 
 
 class Tailscale(unittest.TestCase):

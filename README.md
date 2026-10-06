@@ -61,6 +61,12 @@ reach", "connection dropped"). Moonlight's output for each stream is kept in
 host's Desktop session, so a host's own screen comes back after streaming a
 virtual display; games are never quit automatically.
 
+Beam also learns each host's real frame rate from the end-of-stream stats. If
+you ask for more than a host delivered last time (usually its screen's refresh
+rate), Settings says so under Frame rate, and Connect asks first: Continue,
+Don't show again for this host, or Cancel. Settings → "Show refresh-rate
+warnings again" brings muted warnings back.
+
 ## The Moonlight fork
 
 Beam prefers a self-built fork at `~/beam-moonlight/app/moonlight` (branch
@@ -86,8 +92,11 @@ The fork reads these environment variables, which Beam sets:
 
 A host whose panel is 60 Hz only gives Sunshine 60 new frames a second.
 `host/beam-virtual-display.sh` forces an unused HDMI port connected with a
-custom 1080p 144/120/60 Hz EDID (`host/make_edid.py`), and hooks Sunshine so the
-virtual display is the only screen while streaming. Works with Secure Boot, no
+custom 1080p 144/120/60 Hz EDID (`host/make_edid.py`), and hooks Sunshine so
+streams use it. By default the built-in screen **mirrors** the virtual display
+while streaming, so it never goes dark; `set-mode virtual` makes the virtual
+display the only screen instead (if GNOME won't mirror, the layout is left as
+it is rather than blanking the panel). Works with Secure Boot, no
 reboot (Linux, GNOME/Mutter, Intel i915 tested).
 
 To copy it to the host, `bash host/serve.sh` serves it over your Tailscale IP
@@ -103,6 +112,8 @@ still needs quitting from that client.
 ```bash
 sudo bash beam-virtual-display.sh install   # EDID + boot service + Sunshine hooks
 bash beam-virtual-display.sh status
+bash beam-virtual-display.sh report          # screens, modes, what Sunshine captures
+bash beam-virtual-display.sh set-mode mirror # or: virtual
 sudo bash beam-virtual-display.sh uninstall
 ```
 

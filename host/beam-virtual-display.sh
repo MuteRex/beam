@@ -10,6 +10,8 @@
 #   sudo bash beam-virtual-display.sh install    # set up + turn on + start at boot
 #   sudo bash beam-virtual-display.sh on|off     # toggle now
 #   bash beam-virtual-display.sh status
+#   bash beam-virtual-display.sh report          # screens, modes, Sunshine's capture
+#   bash beam-virtual-display.sh set-mode mirror|virtual   # stream layout (default mirror)
 #   sudo bash beam-virtual-display.sh uninstall
 #
 # A watchdog in the desktop session (installed by "install") puts the built-in
@@ -17,8 +19,9 @@
 # streaming, e.g. after Sunshine crashed mid-stream.
 #
 # Sunshine runs these around each stream (added to sunshine.conf by install):
-#   beam-virtual-display stream-start   # virtual display becomes the only screen
-#   beam-virtual-display stream-stop    # back to the built-in screen only
+#   beam-virtual-display stream-start   # mirror: panel + virtual display (or
+#                                       # virtual only, after set-mode virtual)
+#   beam-virtual-display stream-stop    # back to the layout from before
 # Both accept --dry-run to print the layout without applying it.
 set -euo pipefail
 
@@ -34,7 +37,9 @@ EDID_B64="AP///////wAIrUQBAQAAACgkAQOANR54Du6Ro1RMmSYPUFQgAAABAQEBAQEBAQEBAQEBAQ
 SUNSHINE_PREP='global_prep_cmd = [{"do":"/usr/local/sbin/beam-virtual-display stream-start","undo":"/usr/local/sbin/beam-virtual-display stream-stop"}]'
 
 # Switches GNOME's monitor layout through Mutter's DisplayConfig D-Bus API.
-#   virtual: only the Beam virtual display, highest refresh (temporary layout)
+#   mirror:  panel + virtual display showing the same picture, the virtual one
+#            at its highest refresh (temporary layout; the default for streams)
+#   virtual: only the Beam virtual display (temporary layout; panel goes dark)
 #   builtin: only the built-in panel (saved, so it's the normal layout)
 set_layout() {
     python3 - "$@" <<'PY'
@@ -94,8 +99,70 @@ for (conn, _vendor, product, _serial), modes, props in monitors:
         builtin = entry
     elif other is None:
         other = entry
+panel = builtin or other
 
-chosen = virtual if target == "virtual" else (builtin or other)
+def scale_of(conn, default):
+    """The scale a connector is showing at now, else `default`."""
+    for _x, _y, lscale, _t, _primary, lmons, _p in logical:
+        if any(m[0] == conn for m in lmons):
+            return lscale
+    return default
+
+def remember_layout():
+    """Save the current layout so stream-stop can put it back."""
+    if not dry_run:
+        with open(state, "w") as f:
+            json.dump([(x, y, sc, t, prim, [(m[0], current_mode.get(m[0], "")) for m in mons])
+                       for x, y, sc, t, prim, mons, _p in logical], f)
+
+def wait_for(conns_modes):
+    """Wait until Mutter shows exactly this one logical monitor, so Sunshine
+    captures the new mode rather than the old one."""
+    if dry_run:
+        return
+    import time
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        _s, mons, lmons, _p = call("GetCurrentState")
+        current = {c: m[0] for (c, *_r), modes, _pp in mons for m in modes if m[6].get("is-current")}
+        if len(lmons) == 1 and all(current.get(c) == m for c, m in conns_modes):
+            break
+        time.sleep(0.1)
+    time.sleep(0.3)  # first frames after a modeset can still be black
+
+if target == "mirror":
+    # Panel and virtual display show the same picture: the panel never goes
+    # dark, and the virtual one runs at its highest refresh for Sunshine.
+    if virtual is None or panel is None:
+        print("beam-virtual-display: need both the panel and the virtual display to mirror; "
+              "leaving layout unchanged")
+        sys.exit(0)
+    pconn, pmodes = panel
+    vconn, vmodes = virtual
+    pmode = next((m for m in pmodes if m[0] == current_mode.get(pconn)), None) \
+        or next((m for m in pmodes if m[6].get("is-preferred")), pmodes[0])
+    same_size = [m for m in vmodes if (m[1], m[2]) == (pmode[1], pmode[2])]
+    if not same_size:
+        print(f"beam-virtual-display: virtual display has no {pmode[1]}x{pmode[2]} mode to mirror "
+              "the panel; leaving layout unchanged")
+        sys.exit(0)
+    vmode = max(same_size, key=lambda m: m[3])
+    scale = scale_of(pconn, pmode[4])
+    remember_layout()
+    try:
+        apply([(0, 0, scale, 0, True, [(pconn, pmode[0], {}), (vconn, vmode[0], {})])], 1,
+              f"mirror {pconn} {pmode[0]} + {vconn} {vmode[0]} scale {scale}")
+    except GLib.Error as e:
+        # Never fall back to blanking the panel; stream at whatever it shows now
+        print(f"beam-virtual-display: GNOME refused the mirrored layout ({e.message}); "
+              "leaving layout unchanged")
+        if os.path.exists(state):
+            os.remove(state)
+        sys.exit(0)
+    wait_for([(pconn, pmode[0]), (vconn, vmode[0])])
+    sys.exit(0)
+
+chosen = virtual if target == "virtual" else panel
 if chosen is None:
     print(f"beam-virtual-display: no {target} display found; leaving layout unchanged")
     sys.exit(0)
@@ -104,40 +171,60 @@ conn, modes = chosen
 if target == "virtual":
     # Highest refresh at the largest size
     mode = max(modes, key=lambda m: (m[1] * m[2], m[3]))
+    remember_layout()
 else:
     mode = next((m for m in modes if m[6].get("is-preferred")), modes[0])
-
-# Keep the panel's current scale if it's showing, otherwise its default
-scale = mode[4]
-for _x, _y, lscale, _t, _primary, lmons, _p in logical:
-    if any(m[0] == conn for m in lmons):
-        scale = lscale
-
-if target == "virtual" and not dry_run:
-    # Remember the current layout so stream-stop can restore it
-    with open(state, "w") as f:
-        json.dump([(x, y, sc, t, prim, [(m[0], current_mode.get(m[0], "")) for m in mons])
-                   for x, y, sc, t, prim, mons, _p in logical], f)
+scale = scale_of(conn, mode[4])
 
 layout = [(0, 0, scale, 0, True, [(conn, mode[0], {})])]
 # Temporary while streaming; saved when falling back to the panel
 apply(layout, 1 if target == "virtual" else 2, f"{conn} {mode[0]} scale {scale}")
-
-if target == "virtual" and not dry_run:
-    # Wait until Mutter has actually switched, so Sunshine captures the new mode
-    import time
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        _s, mons, logical, _p = call("GetCurrentState")
-        current = {c: m[0] for (c, *_r), modes, _pp in mons for m in modes if m[6].get("is-current")}
-        if len(logical) == 1 and current.get(conn) == mode[0]:
-            break
-        time.sleep(0.1)
-    time.sleep(0.3)  # first frames after a modeset can still be black
+if target == "virtual":
+    wait_for([(conn, mode[0])])
 PY
 }
 
 runtime_dir() { echo "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; }
+
+# Which layout streams use: mirror (default, panel stays on) or virtual
+MODE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/beam-virtual-display.conf"
+stream_mode() {
+    local mode
+    mode="$(sed -n 's/^mode=//p' "$MODE_FILE" 2>/dev/null | tail -1)"
+    case "$mode" in virtual) echo virtual ;; *) echo mirror ;; esac
+}
+
+status() {
+    local c
+    c="$(connector)"
+    echo "${c##*/card?-}: $(cat "$c/status") ($(cat "$c/enabled")), firmware: '$(cat "$PARAM")'"
+    echo "modes: $(sort -u "$c/modes" 2>/dev/null | tr '\n' ' ')"
+}
+
+# Everything needed to tell whether streams get the high refresh rate
+report() {
+    echo "== connector"; status || true
+    echo "== stream layout mode: $(stream_mode)"
+    echo "== screens (GNOME)"
+    python3 - <<'PY'
+import gi
+from gi.repository import Gio
+bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+_s, monitors, logical, _p = bus.call_sync(
+    "org.gnome.Mutter.DisplayConfig", "/org/gnome/Mutter/DisplayConfig",
+    "org.gnome.Mutter.DisplayConfig", "GetCurrentState", None, None,
+    Gio.DBusCallFlags.NONE, 5000, None).unpack()
+for (conn, _v, product, _sn), modes, props in monitors:
+    cur = next((m[0] for m in modes if m[6].get("is-current")), "off")
+    print(f"  {conn:10} {product:16} current={cur}  builtin={bool(props.get('is-builtin'))}")
+for x, y, scale, _t, primary, mons, _p in logical:
+    print(f"  logical at {x},{y} scale {scale} primary={primary}: {', '.join(m[0] for m in mons)}")
+PY
+    echo "== sunshine.conf"
+    grep -E "^(output_name|capture|encoder|global_prep_cmd)" "$HOME/.config/sunshine/sunshine.conf" 2>/dev/null || echo "  (no matching lines)"
+    echo "== Sunshine's monitor list (last start)"
+    journalctl --user -n 2000 --no-pager 2>/dev/null | grep -iE "monitor [0-9]+|output_name|Found (display|monitor)|-- Detecting" | tail -12 || true
+}
 
 # True while Sunshine on this machine reports a running session
 sunshine_busy() {
@@ -279,7 +366,13 @@ UNITEOF
     ;;
 on) turn_on ;;
 off) turn_off ;;
-stream-start) set_layout virtual "${2:-}" ;;
+stream-start) set_layout "$(stream_mode)" "${2:-}" ;;
+set-mode)
+    case "${2:-}" in
+    mirror|virtual) mkdir -p "$(dirname "$MODE_FILE")"; echo "mode=$2" > "$MODE_FILE"; echo "Streams will use: $2" ;;
+    *) echo "usage: $0 set-mode mirror|virtual" >&2; exit 2 ;;
+    esac ;;
+report) report ;;
 stream-stop) set_layout builtin "${2:-}" ;;
 watchdog) watchdog ;;
 uninstall)
@@ -296,10 +389,6 @@ uninstall)
     systemctl daemon-reload
     echo "Removed."
     ;;
-status)
-    c="$(connector)"
-    echo "${c##*/card?-}: $(cat "$c/status") ($(cat "$c/enabled")), firmware: '$(cat "$PARAM")'"
-    echo "modes: $(sort -u "$c/modes" 2>/dev/null | tr '\n' ' ')"
-    ;;
-*) echo "usage: $0 install|on|off|status|stream-start|stream-stop|watchdog|uninstall" >&2; exit 2 ;;
+status) status ;;
+*) echo "usage: $0 install|on|off|status|report|set-mode|stream-start|stream-stop|watchdog|uninstall" >&2; exit 2 ;;
 esac
