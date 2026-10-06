@@ -12,6 +12,10 @@
 #   bash beam-virtual-display.sh status
 #   sudo bash beam-virtual-display.sh uninstall
 #
+# A watchdog in the desktop session (installed by "install") puts the built-in
+# screen back if the virtual display is still in use while Sunshine isn't
+# streaming, e.g. after Sunshine crashed mid-stream.
+#
 # Sunshine runs these around each stream (added to sunshine.conf by install):
 #   beam-virtual-display stream-start   # virtual display becomes the only screen
 #   beam-virtual-display stream-stop    # back to the built-in screen only
@@ -22,6 +26,7 @@ EDID_NAME="beam-virtual.bin"
 EDID_PATH="/lib/firmware/edid/$EDID_NAME"
 SELF="/usr/local/sbin/beam-virtual-display"
 UNIT="/etc/systemd/system/beam-virtual-display.service"
+WATCHDOG_UNIT="/etc/systemd/user/beam-virtual-display-watchdog.service"
 PARAM="/sys/module/drm/parameters/edid_firmware"
 # 1920x1080 @ 144/120/60 Hz, CVT-RBv2, <= 340 MHz (no HDMI 2.0 scrambling)
 EDID_B64="AP///////wAIrUQBAQAAACgkAQOANR54Du6Ro1RMmSYPUFQgAAABAQEBAQEBAQEBAQEBAQEBKoKAUHA4TUAIIPgMDyghAAAeQGuAUHA4QEAIICgMDyghAAAeAAAA/QAwkB6nIgAKICAgICAgAAAA/ABCZWFtIFZpcnR1YWwKAUUCAxKBQgEQ4gBKZwMMABAAAEQUNIBQcDgfQAggGAQPKCEAAB4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARg=="
@@ -117,7 +122,52 @@ if target == "virtual" and not dry_run:
 layout = [(0, 0, scale, 0, True, [(conn, mode[0], {})])]
 # Temporary while streaming; saved when falling back to the panel
 apply(layout, 1 if target == "virtual" else 2, f"{conn} {mode[0]} scale {scale}")
+
+if target == "virtual" and not dry_run:
+    # Wait until Mutter has actually switched, so Sunshine captures the new mode
+    import time
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        _s, mons, logical, _p = call("GetCurrentState")
+        current = {c: m[0] for (c, *_r), modes, _pp in mons for m in modes if m[6].get("is-current")}
+        if len(logical) == 1 and current.get(conn) == mode[0]:
+            break
+        time.sleep(0.1)
+    time.sleep(0.3)  # first frames after a modeset can still be black
 PY
+}
+
+runtime_dir() { echo "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; }
+
+# True while Sunshine on this machine reports a running session
+sunshine_busy() {
+    python3 - <<'PY'
+import sys, urllib.request
+try:
+    xml = urllib.request.urlopen("http://127.0.0.1:47989/serverinfo", timeout=3).read(65536)
+except OSError:
+    sys.exit(1)
+sys.exit(0 if b"_BUSY</state>" in xml else 1)
+PY
+}
+
+# Runs in the desktop session. Two checks in a row (~40 s) with the virtual
+# layout active but no Sunshine session restore the built-in screen.
+watchdog() {
+    local strikes=0 state
+    state="$(runtime_dir)/beam-virtual-display.layout"
+    while sleep 20; do
+        if [ -f "$state" ] && ! sunshine_busy; then
+            strikes=$((strikes + 1))
+        else
+            strikes=0
+        fi
+        if [ "$strikes" -ge 2 ]; then
+            echo "Virtual display left on with no stream; restoring the built-in screen"
+            set_layout builtin || true
+            strikes=0
+        fi
+    done
 }
 
 need_root() { [ "$(id -u)" = 0 ] || { echo "Run with sudo." >&2; exit 1; }; }
@@ -183,8 +233,22 @@ ExecStop=$SELF off
 [Install]
 WantedBy=graphical.target
 UNITEOF
+    cat > "$WATCHDOG_UNIT" <<UNITEOF
+[Unit]
+Description=Beam: restore the built-in screen if a stream left the virtual display on
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=$SELF watchdog
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+UNITEOF
     systemctl daemon-reload
     systemctl enable beam-virtual-display.service
+    systemctl --global enable beam-virtual-display-watchdog.service
     turn_on
     if [ -n "${SUDO_USER:-}" ]; then
         user_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
@@ -204,6 +268,10 @@ UNITEOF
         # The panel stays the normal screen; the virtual one is only used while streaming
         sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
             "$SELF" stream-stop || true
+        # Start the watchdog now too (it starts by itself at every later login)
+        sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="/run/user/$uid" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            sh -c 'systemctl --user daemon-reload && systemctl --user restart beam-virtual-display-watchdog.service' || true
         echo "Restart Sunshine to load the hooks (this ends any current stream):"
         echo "  systemctl --user restart app-dev.lizardbyte.app.Sunshine.service"
     fi
@@ -211,17 +279,20 @@ UNITEOF
     ;;
 on) turn_on ;;
 off) turn_off ;;
-stream-start)
-    set_layout virtual "${2:-}"
-    # Let Mutter finish the modeset before Sunshine starts capturing
-    [ "${2:-}" = --dry-run ] || sleep 1.5
-    ;;
+stream-start) set_layout virtual "${2:-}" ;;
 stream-stop) set_layout builtin "${2:-}" ;;
+watchdog) watchdog ;;
 uninstall)
     need_root
     systemctl disable --now beam-virtual-display.service 2>/dev/null || true
+    systemctl --global disable beam-virtual-display-watchdog.service 2>/dev/null || true
+    if [ -n "${SUDO_USER:-}" ]; then
+        uid="$(id -u "$SUDO_USER")"
+        sudo -u "$SUDO_USER" XDG_RUNTIME_DIR="/run/user/$uid" \
+            systemctl --user stop beam-virtual-display-watchdog.service 2>/dev/null || true
+    fi
     turn_off || true
-    rm -f "$UNIT" "$SELF" "$EDID_PATH"
+    rm -f "$UNIT" "$WATCHDOG_UNIT" "$SELF" "$EDID_PATH"
     systemctl daemon-reload
     echo "Removed."
     ;;
@@ -230,5 +301,5 @@ status)
     echo "${c##*/card?-}: $(cat "$c/status") ($(cat "$c/enabled")), firmware: '$(cat "$PARAM")'"
     echo "modes: $(sort -u "$c/modes" 2>/dev/null | tr '\n' ' ')"
     ;;
-*) echo "usage: $0 install|on|off|status|stream-start|stream-stop|uninstall" >&2; exit 2 ;;
+*) echo "usage: $0 install|on|off|status|stream-start|stream-stop|watchdog|uninstall" >&2; exit 2 ;;
 esac

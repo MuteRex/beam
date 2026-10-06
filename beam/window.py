@@ -11,7 +11,7 @@ from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
 from . import __version__  # noqa: E402
 from . import config as cfg  # noqa: E402
 from . import probe  # noqa: E402
-from .launcher import MoonlightLauncher  # noqa: E402
+from .launcher import DESKTOP_APP, MoonlightLauncher  # noqa: E402
 from .providers import ALL_PROVIDERS, Host  # noqa: E402
 
 OS_ICON = {
@@ -431,14 +431,38 @@ class BeamWindow(Adw.ApplicationWindow):
 
     # ---- host actions ---------------------------------------------------
     def on_connect(self, host: Host):
-        try:
-            self.launcher.stream(self.launcher.address_for(host), display_pos=self._monitor_pos())
+        if self._start_stream(host):
             disp = self.config.get("display_mode", "fullscreen")
             mouse = "cursor free" if self.config.get("mouse_mode") == "desktop" \
                 else "cursor locked"
             self._toast(f"Connecting to {host.name} · {disp} · {mouse}…")
+
+    def _start_stream(self, host: Host, app: str | None = None) -> bool:
+        address = self.launcher.address_for(host)
+        try:
+            self.launcher.stream(address, app, display_pos=self._monitor_pos(),
+                                 host_name=host.name,
+                                 on_exit=lambda r: self._on_stream_end(r))
+            return True
         except Exception as e:  # noqa: BLE001
             self._toast(f"Launch failed: {e}")
+            return False
+
+    def _on_stream_end(self, result):
+        if result.message:
+            self._toast(result.message)
+        if result.app != DESKTOP_APP:
+            return  # never end a game on the host without asking
+
+        def work():
+            # A Desktop session left running (connection dropped, Moonlight
+            # crashed) keeps the host on its streaming display. Ending it runs
+            # the host's stream-stop hooks.
+            GLib.usleep(2_000_000)  # Moonlight's own --quit-after goes first
+            if self.launcher.host_busy(result.address) and \
+                    self.launcher.end_session(result.address):
+                GLib.idle_add(self._toast, "Ended the leftover desktop session on the host.")
+        threading.Thread(target=work, daemon=True).start()
 
     def _on_pair_action(self, _action, param):
         host = self._hosts_by_id.get(param.get_string())
@@ -588,12 +612,8 @@ class BeamWindow(Adw.ApplicationWindow):
         def on_resp(_d, resp):
             if resp == "go":
                 app = apps[drop.get_selected()]
-                try:
-                    self.launcher.stream(self.launcher.address_for(host), app,
-                                         display_pos=self._monitor_pos())
+                if self._start_stream(host, app):
                     self._toast(f"Streaming {app} from {host.name}…")
-                except Exception as e:  # noqa: BLE001
-                    self._toast(f"Launch failed: {e}")
         dlg.connect("response", on_resp)
         dlg.present(self)
 

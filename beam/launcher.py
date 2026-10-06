@@ -6,8 +6,11 @@ the user's saved preferences and launches it without blocking the UI.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from gi.repository import Gio, GLib
@@ -15,8 +18,60 @@ from gi.repository import Gio, GLib
 from . import options, probe
 
 
-# Self-built Moonlight fork with the in-stream Beam pill (see FORK_PLAN.md)
+# Self-built Moonlight fork with the in-stream Beam pill
 FORK_BIN = Path.home() / "beam-moonlight" / "app" / "moonlight"
+
+LOG_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "beam" / "logs"
+LOGS_KEPT = 20
+
+# Sunshine's built-in remote desktop app. Ending it on disconnect loses nothing
+# (there is nothing to resume) and runs the host's stream-stop hooks, which is
+# what puts a host's own screen back after streaming a virtual display.
+DESKTOP_APP = "Desktop"
+
+
+@dataclass
+class StreamResult:
+    """How a stream ended, read from Moonlight's log."""
+    address: str
+    app: str
+    log_path: Path
+    clean: bool           # ended by the user, not by an error or a drop
+    message: str          # one line for the user; "" when there's nothing to say
+
+
+# Moonlight log lines -> what to tell the user, in priority order
+_FAILURES = [
+    (r"has not been paired", "{host} isn't paired yet. Use ⋯ → Pair with host…"),
+    (r"Failed to connect to", "Couldn't reach {host}."),
+    (r"Failed to find application", "{host} has no app called “{app}”."),
+    (r"Connection terminated: -100\b", "No video arrived from {host}; check its firewall."),
+    (r"Connection terminated: -?[1-9]", "The connection to {host} dropped."),
+]
+
+
+def read_result(address: str, app: str, log_path: Path, host_name: str = "") -> StreamResult:
+    try:
+        text = log_path.read_text(errors="replace")
+    except OSError:
+        text = ""
+    host = host_name or address
+    for pattern, message in _FAILURES:
+        if re.search(pattern, text):
+            return StreamResult(address, app, log_path, False, message.format(host=host, app=app))
+    started = "Connection terminated" in text or "Global video stats" in text
+    return StreamResult(address, app, log_path, True,
+                        f"Disconnected from {host}." if started else "")
+
+
+def _new_log_path(address: str) -> Path:
+    LOG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    LOG_DIR.chmod(0o700)  # logs name your hosts and their addresses
+    logs = sorted(LOG_DIR.glob("stream-*.log"))
+    for old in logs[:max(0, len(logs) - LOGS_KEPT + 1)]:
+        old.unlink(missing_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9.-]", "_", address)
+    return LOG_DIR / f"stream-{time.strftime('%Y%m%d-%H%M%S')}-{safe}.log"
 
 
 def resolve_moonlight_bin(configured: str = "") -> str:
@@ -65,6 +120,8 @@ class MoonlightLauncher:
 
     def _stream_args(self, address: str, app: str) -> list[str]:
         c = self.config
+        if app == DESKTOP_APP:
+            c = dict(c, quit_after=True)
         args = [self.bin, "stream", *self.video_args(), *options.cli_args(c)]
         stats = c.get("stats_level") or "off"
         args.append("--no-performance-overlay" if stats == "off" else "--performance-overlay")
@@ -99,15 +156,18 @@ class MoonlightLauncher:
         return tailnet or lan or host.address
 
     def stream(self, address: str, app: str | None = None,
-               display_pos: tuple[int, int] | None = None) -> list[str]:
-        """Launch a stream detached; returns the argv used (for logging)."""
+               display_pos: tuple[int, int] | None = None,
+               on_exit=None, host_name: str = "") -> Path:
+        """Launch a stream without blocking. Moonlight's output goes to a log
+        file (returned); `on_exit(StreamResult)` runs on the main loop when the
+        stream ends."""
         if not probe.valid_address(address):
             raise ValueError(f"not a valid host address: {address!r}")
-        app = app or self.config.get("default_app") or "Desktop"
+        app = app or self.config.get("default_app") or DESKTOP_APP
         args = self._stream_args(address, app)
-        launcher = Gio.SubprocessLauncher.new(
-            Gio.SubprocessFlags.STDOUT_SILENCE |
-            Gio.SubprocessFlags.STDERR_SILENCE)
+        log_path = _new_log_path(address)
+        launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.STDERR_MERGE)
+        launcher.set_stdout_file_path(str(log_path))
         if not self.config.get("show_pill", True):
             launcher.setenv("BEAM_HIDE_PILL", "1", True)
         if (self.config.get("stats_level") or "off") != "off":
@@ -116,8 +176,36 @@ class MoonlightLauncher:
         if display_pos is not None:
             # The fork opens the stream on this monitor (Wayland can't tell it)
             launcher.setenv("BEAM_DISPLAY_POS", "%d,%d" % display_pos, True)
-        launcher.spawnv(args)
-        return args
+        proc = launcher.spawnv(args)
+
+        def done(p, res):
+            try:
+                p.wait_finish(res)
+            except GLib.Error:
+                pass
+            if on_exit is not None:
+                on_exit(read_result(address, app, log_path, host_name))
+
+        proc.wait_async(None, done)
+        return log_path
+
+    def end_session(self, address: str) -> bool:
+        """Blocking: quit whatever app the host is running (`moonlight quit`).
+        Run off the main thread."""
+        if not probe.valid_address(address):
+            return False
+        try:
+            out = subprocess.run([self.bin, "quit", "--", address],
+                                 capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return out.returncode == 0
+
+    @staticmethod
+    def host_busy(address: str) -> bool:
+        """True while the host still has a session (running app)."""
+        info = probe.server_info(address, timeout=3) or {}
+        return info.get("state", "").endswith("_BUSY")
 
     def pair(self, address: str, pin: str) -> tuple[bool, str]:
         """Blocking pair. Run off the main thread. Returns (ok, message)."""

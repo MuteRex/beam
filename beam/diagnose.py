@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from . import bench, options, probe
+from .launcher import DESKTOP_APP
 
 # Bits of Sunshine's ServerCodecModeSupport
 SCM_H264 = 0x00001
@@ -107,6 +108,11 @@ def run(launcher, address: str, app: str = "Desktop", seconds: int = 15,
     except RuntimeError as e:
         report.error = str(e)
         return report
+    finally:
+        # The test's own Desktop session would otherwise keep running on the
+        # host (and keep it on its streaming display). Games are left alone.
+        if app == DESKTOP_APP and launcher.host_busy(address):
+            launcher.end_session(address)
 
     if result.error:
         report.error = f"Test stream failed: {result.error}"

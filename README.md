@@ -55,6 +55,12 @@ Needs `python3-gi`, GTK 4 + libadwaita ≥ 1.6, and Moonlight. Optional:
 2. **Connect** streams the default app (Desktop); **⋯ → Choose app…** picks one.
 3. Settings (Ctrl+,) are saved to `~/.config/beam/config.json`.
 
+Beam watches each stream and says how it ended ("isn't paired", "couldn't
+reach", "connection dropped"). Moonlight's output for each stream is kept in
+`~/.local/state/beam/logs/` (last 20). Ending a **Desktop** stream also ends the
+host's Desktop session, so a host's own screen comes back after streaming a
+virtual display; games are never quit automatically.
+
 ## The Moonlight fork
 
 Beam prefers a self-built fork at `~/beam-moonlight/app/moonlight` (branch
@@ -86,6 +92,13 @@ reboot (Linux, GNOME/Mutter, Intel i915 tested).
 
 To copy it to the host, `bash host/serve.sh` serves it over your Tailscale IP
 and prints a command that checks its SHA-256 before running it as root.
+
+Sunshine only runs a hook's undo step when the streamed app quits, not when a
+client disconnects, so Beam ends Desktop sessions on disconnect. As a backstop,
+`install` also adds a watchdog to the desktop session that restores the built-in
+screen if the virtual display is still on ~40 s after Sunshine stopped streaming
+(e.g. Sunshine crashed). A session left paused by another client (not Beam)
+still needs quitting from that client.
 
 ```bash
 sudo bash beam-virtual-display.sh install   # EDID + boot service + Sunshine hooks

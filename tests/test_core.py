@@ -20,7 +20,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 
 from beam import config, options, probe  # noqa: E402
-from beam.launcher import MoonlightLauncher  # noqa: E402
+from beam.launcher import MoonlightLauncher, read_result  # noqa: E402
 from beam.providers.base import Host  # noqa: E402
 from beam.providers.tailscale import TailscaleProvider  # noqa: E402
 
@@ -118,6 +118,42 @@ class CommandLine(unittest.TestCase):
             {"kind": "lan", "address": "192.168.1.9"}]})
         self.assertEqual(self.launcher().address_for(h), "192.168.1.9")
         self.assertEqual(self.launcher(prefer_lan=False).address_for(h), "100.64.0.2")
+
+
+class StreamEnd(unittest.TestCase):
+    def result(self, log):
+        with tempfile.NamedTemporaryFile("w", suffix=".log", delete=False) as f:
+            f.write(log)
+        try:
+            return read_result("192.168.1.5", "Desktop", Path(f.name), "vivo")
+        finally:
+            os.unlink(f.name)
+
+    def test_failures_are_named(self):
+        cases = {
+            "00:00:30 - Qt Critical: Failed to connect to 192.168.1.5": "Couldn't reach vivo.",
+            "Qt Critical: Computer vivo has not been paired. Please open": "isn't paired",
+            "SDL Error (0): Connection terminated: -100": "No video arrived",
+            "SDL Error (0): Connection terminated: -102": "dropped",
+        }
+        for log, expected in cases.items():
+            r = self.result(log)
+            self.assertFalse(r.clean, log)
+            self.assertIn(expected, r.message)
+
+    def test_clean_end(self):
+        r = self.result("Global video stats\n...\nConnection terminated: 0")
+        self.assertTrue(r.clean)
+        self.assertEqual(r.message, "Disconnected from vivo.")
+        self.assertEqual(self.result("").message, "")
+
+    def test_only_desktop_quits_the_host_app(self):
+        c = dict(config.DEFAULTS, moonlight_bin="/bin/true", quit_after=False)
+        launcher = MoonlightLauncher(c)
+        self.assertIn("--quit-after", launcher._stream_args("192.168.1.5", "Desktop"))
+        game = launcher._stream_args("192.168.1.5", "Steam Big Picture")
+        self.assertIn("--no-quit-after", game)
+        self.assertNotIn("--quit-after", game)
 
 
 class Tailscale(unittest.TestCase):
