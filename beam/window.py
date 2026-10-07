@@ -500,7 +500,7 @@ class BeamWindow(Adw.ApplicationWindow):
             known[key] = {"fps": limit, "name": host.name}
         elif delivered and delivered >= requested * 0.9 and key in known \
                 and requested > known[key]["fps"]:
-            del known[key]  # it now delivers more (e.g. a virtual display was set up)
+            del known[key]  # it now delivers more (e.g. the host got a faster screen)
         else:
             return
         self.config["host_fps"] = known

@@ -25,8 +25,7 @@ LOG_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"
 LOGS_KEPT = 20
 
 # Sunshine's built-in remote desktop app. Ending it on disconnect loses nothing
-# (there is nothing to resume) and runs the host's stream-stop hooks, which is
-# what puts a host's own screen back after streaming a virtual display.
+# (there is nothing to resume) and runs any undo hooks the host has set up.
 DESKTOP_APP = "Desktop"
 
 

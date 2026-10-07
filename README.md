@@ -58,8 +58,8 @@ Needs `python3-gi`, GTK 4 + libadwaita ≥ 1.6, and Moonlight. Optional:
 Beam watches each stream and says how it ended ("isn't paired", "couldn't
 reach", "connection dropped"). Moonlight's output for each stream is kept in
 `~/.local/state/beam/logs/` (last 20). Ending a **Desktop** stream also ends the
-host's Desktop session, so a host's own screen comes back after streaming a
-virtual display; games are never quit automatically.
+host's Desktop session (there is nothing to resume); games are never quit
+automatically.
 
 Beam also learns each host's real frame rate from the end-of-stream stats. If
 you ask for more than a host delivered last time (usually its screen's refresh
@@ -87,35 +87,6 @@ wayland-protocols` plus the `qml6-module-qtquick*` modules.
 The fork reads these environment variables, which Beam sets:
 `BEAM_HIDE_PILL=1`, `BEAM_STATS_LEVEL=basic|standard|advanced`,
 `BEAM_DISPLAY_POS=x,y` (monitor to open on; Wayland can't tell Qt).
-
-## Host: virtual high-refresh display
-
-A host whose panel is 60 Hz only gives Sunshine 60 new frames a second.
-`host/beam-virtual-display.sh` forces an unused HDMI port connected with a
-custom 1080p 144/120/60 Hz EDID (`host/make_edid.py`), and hooks Sunshine so
-streams use it. By default the built-in screen **mirrors** the virtual display
-while streaming, so it never goes dark; `set-mode virtual` makes the virtual
-display the only screen instead (if GNOME won't mirror, the layout is left as
-it is rather than blanking the panel). Works with Secure Boot, no
-reboot (Linux, GNOME/Mutter, Intel i915 tested).
-
-To copy it to the host, `bash host/serve.sh` serves it over your Tailscale IP
-and prints a command that checks its SHA-256 before running it as root.
-
-Sunshine only runs a hook's undo step when the streamed app quits, not when a
-client disconnects, so Beam ends Desktop sessions on disconnect. As a backstop,
-`install` also adds a watchdog to the desktop session that restores the built-in
-screen if the virtual display is still on ~40 s after Sunshine stopped streaming
-(e.g. Sunshine crashed). A session left paused by another client (not Beam)
-still needs quitting from that client.
-
-```bash
-sudo bash beam-virtual-display.sh install   # EDID + boot service + Sunshine hooks
-bash beam-virtual-display.sh status
-bash beam-virtual-display.sh report          # screens, modes, what Sunshine captures
-bash beam-virtual-display.sh set-mode mirror # or: virtual
-sudo bash beam-virtual-display.sh uninstall
-```
 
 ## Benchmark
 
@@ -152,7 +123,6 @@ host / network / decode / render latency per configuration.
 | `beam/probe.py` | address validation, Sunshine port probe, serverinfo |
 | `beam/diagnose.py`, `beam/bench.py` | Test connection and the benchmark |
 | `beam/providers/` | discovery providers and the `Host` contract |
-| `host/` | virtual display script, EDID generator, delivery helper |
 | `tests/` | `python3 -m unittest discover -s tests` |
 
 ## License
