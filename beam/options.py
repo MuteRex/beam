@@ -50,7 +50,7 @@ ADVANCED = [
     ]),
     ("Input", [
         Option("capture_system_keys", "choice", "Capture system shortcuts",
-               "Send Super, Alt+Tab and similar keys to the host",
+               "Send Super, Alt+Tab and similar keys to the host (Full immersion in the Beam menu toggles it mid-stream)",
                "fullscreen", "capture-system-keys", choices=("never", "fullscreen", "always")),
         Option("mouse_buttons_swap", "switch", "Swap mouse buttons", "", False,
                "mouse-buttons-swap"),
@@ -74,6 +74,9 @@ ADVANCED = [
                "Prevent screen blanking while streaming", True, "keep-awake"),
     ]),
     ("Beam", [
+        Option("host_screens", "spin", "Host screens",
+               "Screen buttons in the in-stream Beam menu; Sunshine switches monitors mid-stream",
+               2, low=1, high=12, step=1),
         Option("test_seconds", "spin", "Test connection length",
                "Seconds of headless streaming per connection test", 15,
                low=5, high=60, step=5),

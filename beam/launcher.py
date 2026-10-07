@@ -191,6 +191,8 @@ class MoonlightLauncher:
         if (self.config.get("stats_level") or "off") != "off":
             # The fork's stats panel level (it cycles in-stream from the Beam menu)
             launcher.setenv("BEAM_STATS_LEVEL", self.config["stats_level"], True)
+        # Screen buttons in the fork's menu (Sunshine's Ctrl+Alt+Shift+F1..F12)
+        launcher.setenv("BEAM_SCREENS", str(int(self.config.get("host_screens") or 2)), True)
         if display_pos is not None:
             # The fork opens the stream on this monitor (Wayland can't tell it)
             launcher.setenv("BEAM_DISPLAY_POS", "%d,%d" % display_pos, True)
