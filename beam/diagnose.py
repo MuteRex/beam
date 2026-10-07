@@ -1,17 +1,6 @@
-"""Connection diagnostics behind "Test connection…".
-
-1. Ping: latency, jitter, loss.
-2. The host's encoders.
-3. A bitrate ladder: short headless streams at rising bitrates over the route a
-   real stream would use. Sunshine sends full-size frames even for a still
-   desktop, so each step really loads the link; the first step that loses
-   frames ends the ladder, and the recommendation leaves headroom below the
-   last clean one.
-4. Timings (host, network, decode, render) from the best clean step.
-
-Progress is reported as a fraction so the dialog can show a percentage and the
-ladder filling in live.
-"""
+"""Test connection: ping, host encoders, then headless streams at rising
+bitrates until frames drop. Sunshine pads frames to the bitrate even on a
+still desktop, so each step really loads the link."""
 from __future__ import annotations
 
 import re
@@ -39,15 +28,12 @@ class Metric:
     target: str
 
 
-# Bitrate ladders (kbps). Home tops out where 1080p/1440p stops gaining; away
-# starts low because a phone hotspot often can't hold more than 10-20 Mbps.
+# kbps; a phone hotspot often can't hold more than 10-20 Mbps
 HOME_LADDER = [10000, 20000, 35000, 50000, 80000]
 AWAY_LADDER = [3000, 6000, 10000, 15000, 25000]
 
-# Moonlight needs a moment to connect before the frames it counts are steady
 STEP_STARTUP_S = 3.0
 
-# Share of the progress bar for each stage
 PING_SHARE, CODEC_SHARE = 0.10, 0.02
 LADDER_START = PING_SHARE + CODEC_SHARE
 
@@ -107,9 +93,8 @@ def rate_step(stats: dict, error: str = "") -> str:
 
 
 def recommend(steps: list[Step]) -> int | None:
-    """A bitrate with headroom below what the link carried cleanly, rounded down
-    to whole Mbps. All steps clean up to the top: the top step (the link has
-    more to give than any setting needs). Nothing clean: None."""
+    """85% of the highest clean step in whole Mbps, or the top step if every
+    step was clean. None if nothing was usable."""
     measured = [s for s in steps if s.rating]
     clean = [s.kbps for s in measured if s.rating == GOOD]
     if clean:
@@ -126,7 +111,7 @@ def recommend(steps: list[Step]) -> int | None:
 
 def verdict(recommended: int | None, ping_ms: float | None, loss_pct: float | None,
             route: str) -> tuple[str, str]:
-    """One word for the summary, and its rating colour."""
+
     if recommended is None:
         return "Poor", BAD
     lossy = (loss_pct or 0) > 2
@@ -141,7 +126,7 @@ def verdict(recommended: int | None, ping_ms: float | None, loss_pct: float | No
 
 
 def _with_bitrate(args: list[str], kbps: int) -> list[str]:
-    """`args` with --bitrate set to `kbps` (any existing value replaced)."""
+
     out, skip = [], False
     for a in args:
         if skip:
@@ -192,8 +177,7 @@ def _rate(value: float, good: float, ok: float) -> str:
 
 def run(launcher, address: str, app: str = "Desktop", step_seconds: int = 5,
         progress=lambda p: None, stop: threading.Event | None = None) -> Report:
-    """Run the whole test. `progress(Progress)` is called from this thread;
-    setting `stop` ends it after the current step."""
+    """`stop` ends the test after the current step."""
     route = bitrate.route_of(probe.is_lan_address(address))
     report = Report(address, route)
     report.steps = [Step(kbps) for kbps in ladder_for(route)]
@@ -204,7 +188,7 @@ def run(launcher, address: str, app: str = "Desktop", step_seconds: int = 5,
     lock = threading.Lock()
 
     def tell(fraction, stage, current=None):
-        # Never backwards: the ticker thread and the step loop both report
+        # The ticker thread and the step loop both report
         with lock:
             shown[0] = max(shown[0], min(1.0, round(fraction, 4)))
             progress(Progress(shown[0], stage, [Step(**vars(s)) for s in report.steps], current))
@@ -233,7 +217,7 @@ def run(launcher, address: str, app: str = "Desktop", step_seconds: int = 5,
         report.metrics.append(Metric("Host codecs", ", ".join(sorted(codecs)) or "none",
                                      GOOD if hw else BAD, "H.264 + HEVC (+ AV1)"))
 
-    # Same flags as a real stream, minus quitting the host app between steps
+    # No --quit-after: the host app must survive between steps
     flags = [a for a in options.cli_args(cfg) if a not in ("--quit-after",)]
     base = launcher.video_args() + flags
     per_step = (1.0 - LADDER_START) / len(report.steps)
@@ -247,7 +231,6 @@ def run(launcher, address: str, app: str = "Desktop", step_seconds: int = 5,
                 stage = f"Streaming at {bitrate.label(step.kbps)}…"
                 tell(start, stage, i)
 
-                # Tick the bar along while the step streams
                 done = threading.Event()
                 expected = step_seconds + STEP_STARTUP_S
 

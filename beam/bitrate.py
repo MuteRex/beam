@@ -1,12 +1,8 @@
-"""Bitrate choices shared by the Settings sliders, the launcher and the connection
-test. Pure, so it is unit tested without a display.
-
-All values are kbps, as Moonlight's --bitrate takes them; 0 means "no value"
-(Moonlight's automatic choice, or no cap).
-"""
+"""Bitrate settings shared by Settings, the launcher and Test connection.
+Values are kbps; 0 = Moonlight auto / no cap."""
 from __future__ import annotations
 
-# Slider stops: dense where it matters (mobile data, Wi-Fi), sparse above
+# Denser at the low end, where mobile and Wi-Fi links sit
 STEPS_KBPS = [0, 2000, 3000, 4000, 5000, 6000, 8000, 10000, 12000, 15000, 20000,
               25000, 30000, 40000, 50000, 60000, 80000, 100000, 120000, 150000]
 MAX_KBPS = STEPS_KBPS[-1]
@@ -58,13 +54,8 @@ def host_limit(config: dict, host_key: str | None, route: str) -> int:
 
 
 def choose(config: dict, route: str, host_key: str | None = None) -> int:
-    """The bitrate to stream at (0 = Moonlight auto).
-
-    A per-computer value from Test connection wins: it was measured on this
-    route. Otherwise home uses the Home bitrate, and away uses the Home bitrate
-    capped at Away bitrate, since an internet link (a phone hotspot, say) is
-    slower and less steady, and Moonlight can't lower its bitrate mid-stream.
-    """
+    """Per-computer value from Test connection, else Home bitrate, capped at
+    Away bitrate off the LAN (Moonlight can't lower its bitrate mid-stream)."""
     tested = host_limit(config, host_key, route)
     if tested:
         return min(tested, MAX_KBPS)

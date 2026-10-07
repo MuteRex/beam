@@ -26,8 +26,6 @@ def _combo(strings, current):
 
 
 class BitrateRow(Adw.PreferencesRow):
-    """Title and live value on top, a slider that snaps to sensible bitrates,
-    and how much data that uses an hour (mobile data adds up)."""
 
     MARKS = (0, 5000, 10000, 20000, 50000, 150000)
 

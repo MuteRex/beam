@@ -1,6 +1,4 @@
-"""Test connection dialog: intro → live progress with the bitrate ladder filling
-in → a summary with a recommended bitrate that can be saved for this computer.
-"""
+"""Test connection dialog."""
 from __future__ import annotations
 
 import math
@@ -45,8 +43,6 @@ progressbar.beam-progress > trough > progress { min-height: 8px; border-radius: 
 
 
 class LadderChart(Gtk.DrawingArea):
-    """One bar per bitrate step: height grows with the bitrate, colour shows how
-    the link coped. The step being streamed pulses."""
 
     def __init__(self, steps: list[diagnose.Step]):
         super().__init__(content_height=150, hexpand=True)
@@ -94,7 +90,6 @@ class LadderChart(Gtk.DrawingArea):
             h = usable * frac
             y = top_pad + usable - h
 
-            # Track (the full height, so pending steps still show their size)
             _rounded(cr, x, y, bar_w, h, 7)
             cr.set_source_rgb(*TRACK)
             cr.fill()
@@ -109,7 +104,6 @@ class LadderChart(Gtk.DrawingArea):
                 _rounded(cr, x, y, bar_w, h, 7)
                 cr.fill()
 
-            # Mark above the bar: drop % once measured, ✕ when it failed
             mark = ""
             if step.rating == diagnose.BAD and step.drop_pct is None:
                 mark = "✕"

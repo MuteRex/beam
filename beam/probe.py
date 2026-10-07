@@ -52,9 +52,7 @@ _TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
 
 
 def is_lan_address(address: str) -> bool:
-    """True for addresses on the local network (private IPv4, link-local, IPv6
-    ULA, *.local names). Tailscale addresses and public ones are "away": the
-    stream crosses the internet, where bandwidth is lower and less steady."""
+    """Private IPv4, link-local, IPv6 ULA or *.local; Tailscale counts as away."""
     if not isinstance(address, str) or not address:
         return False
     if address.rstrip(".").lower().endswith(".local"):
