@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from gi.repository import Adw, Gtk
 
+from . import bitrate
 from . import config as cfg
 from . import options
 from .launcher import is_fork, resolve_moonlight_bin
@@ -22,6 +23,58 @@ def _combo(strings, current):
         d.set_selected(strings.index(current))
     d.set_valign(Gtk.Align.CENTER)
     return d
+
+
+class BitrateRow(Adw.PreferencesRow):
+    """Title and live value on top, a slider that snaps to sensible bitrates,
+    and how much data that uses an hour (mobile data adds up)."""
+
+    MARKS = (0, 5000, 10000, 20000, 50000, 150000)
+
+    def __init__(self, title: str, kbps: int, zero_label: str, zero_hint: str):
+        super().__init__(title=title)
+        self.zero_label, self.zero_hint = zero_label, zero_hint
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                      margin_top=10, margin_bottom=8, margin_start=12, margin_end=12)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        head.append(Gtk.Label(label=title, xalign=0, hexpand=True))
+        self.value = Gtk.Label(xalign=1)
+        self.value.add_css_class("bitrate-value")
+        head.append(self.value)
+        box.append(head)
+
+        self.scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0,
+                                              len(bitrate.STEPS_KBPS) - 1, 1)
+        self.scale.set_draw_value(False)
+        self.scale.set_round_digits(0)
+        self.scale.add_css_class("bitrate-scale")
+        for mark in self.MARKS:
+            self.scale.add_mark(bitrate.index_for(mark), Gtk.PositionType.BOTTOM,
+                                zero_label if mark == 0 else str(mark // 1000))
+        self.scale.set_value(bitrate.index_for(kbps))
+        self.scale.connect("value-changed", self._changed)
+        box.append(self.scale)
+
+        self.hint = Gtk.Label(xalign=0, wrap=True)
+        self.hint.add_css_class("caption")
+        self.hint.add_css_class("dim-label")
+        box.append(self.hint)
+        self.set_child(box)
+        self._changed(self.scale)
+
+    def _changed(self, scale):
+        index = int(round(scale.get_value()))
+        if scale.get_value() != index:
+            scale.set_value(index)  # snap; re-enters once with the same index
+            return
+        kbps = self.kbps
+        self.value.set_label(bitrate.label(kbps, self.zero_label))
+        hint = bitrate.usage_hint(kbps)
+        self.hint.set_label(hint[0].upper() + hint[1:] if hint else self.zero_hint)
+
+    @property
+    def kbps(self) -> int:
+        return bitrate.kbps_at(int(round(self.scale.get_value())))
 
 
 class SettingsDialog(Adw.PreferencesDialog):
@@ -47,21 +100,6 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.fps.connect("notify::selected", self._update_fps_note)
         self._update_fps_note()
 
-        self.bitrate = Adw.SpinRow(
-            title="Bitrate (Mbps, 0 = auto)",
-            adjustment=Gtk.Adjustment(
-                lower=0, upper=150, step_increment=5,
-                value=int(self.config.get("bitrate", 0)) / 1000))
-        video.add(self.bitrate)
-
-        self.away_bitrate = Adw.SpinRow(
-            title="Away bitrate (Mbps, 0 = no limit)",
-            subtitle="Cap when streaming over the internet, e.g. a phone hotspot",
-            adjustment=Gtk.Adjustment(
-                lower=0, upper=150, step_increment=1,
-                value=int(self.config.get("away_bitrate", 8000)) / 1000))
-        video.add(self.away_bitrate)
-
         self.display = _combo(DISPLAY, self.config.get("display_mode"))
         self._row(video, "Display mode", self.display)
 
@@ -69,6 +107,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.unmute.set_sensitive(bool(self.config.get("fps_warning_muted")))
         self.unmute.connect("activated", self._unmute_fps_warnings)
         video.add(self.unmute)
+
+        self._build_bitrate_group(page)
 
         latency = Adw.PreferencesGroup(
             title="Latency",
@@ -250,11 +290,66 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(r)
         return r
 
+    def _build_bitrate_group(self, page):
+        group = Adw.PreferencesGroup(
+            title="Bitrate",
+            description="Higher looks sharper but needs a steadier connection. "
+                        "“Test connection” in a computer’s ⋯ menu measures what yours can carry.")
+        page.add(group)
+        self.bitrate = BitrateRow("At home", int(self.config.get("bitrate") or 0), "Auto",
+                                  "Moonlight picks it from the resolution (about 20 Mbps at 1080p60)")
+        group.add(self.bitrate)
+        self.away_bitrate = BitrateRow("Away from home", int(self.config.get("away_bitrate") or 0),
+                                       "No limit", "Same as at home")
+        group.add(self.away_bitrate)
+
+        self.per_host = Adw.PreferencesGroup(
+            title="Per-computer bitrates",
+            description="Saved from Test connection. They replace the values above "
+                        "for that computer, on that route.")
+        page.add(self.per_host)
+        self._per_host_rows = []
+        self._fill_per_host()
+
+    def _fill_per_host(self):
+        for row in self._per_host_rows:
+            self.per_host.remove(row)
+        self._per_host_rows = []
+        saved = self.config.get("host_bitrates") or {}
+        if not saved:
+            row = Adw.ActionRow(title="None yet",
+                                subtitle="Run Test connection from a computer’s ⋯ menu")
+            row.add_css_class("dim-label")
+            self.per_host.add(row)
+            self._per_host_rows.append(row)
+            return
+        for key, entry in sorted(saved.items(), key=lambda kv: kv[1].get("name", "")):
+            parts = []
+            if entry.get("home"):
+                parts.append(f"Home {bitrate.label(entry['home'])}")
+            if entry.get("away"):
+                parts.append(f"Away {bitrate.label(entry['away'])}")
+            row = Adw.ActionRow(title=entry.get("name") or key, subtitle=" · ".join(parts),
+                                use_markup=False)
+            remove = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER,
+                                tooltip_text="Remove")
+            remove.add_css_class("flat")
+            remove.connect("clicked", self._remove_host_bitrate, key)
+            row.add_suffix(remove)
+            self.per_host.add(row)
+            self._per_host_rows.append(row)
+
+    def _remove_host_bitrate(self, _button, key):
+        saved = dict(self.config.get("host_bitrates") or {})
+        saved.pop(key, None)
+        self.config["host_bitrates"] = saved
+        self._fill_per_host()
+
     def _save(self, *_):
         self.config["resolution"] = RESOLUTIONS[self.res.get_selected()]
         self.config["fps"] = int(FPS[self.fps.get_selected()])
-        self.config["bitrate"] = int(self.bitrate.get_value() * 1000)
-        self.config["away_bitrate"] = int(self.away_bitrate.get_value() * 1000)
+        self.config["bitrate"] = self.bitrate.kbps
+        self.config["away_bitrate"] = self.away_bitrate.kbps
         self.config["display_mode"] = DISPLAY[self.display.get_selected()]
         self.config["audio_config"] = AUDIO[self.audio.get_selected()]
         self.config["multi_controller"] = self.multi.get_active()

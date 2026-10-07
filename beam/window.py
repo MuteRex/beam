@@ -78,6 +78,10 @@ switch:checked > slider { background-color: #0c0c0c; }
 .diag-good { color: #9ae600; font-weight: 600; }
 .diag-ok { color: #f5c211; font-weight: 600; }
 .diag-bad { color: #ff6b6b; font-weight: 600; }
+
+.bitrate-value { color: #9ae600; font-weight: 700; font-feature-settings: "tnum"; }
+scale.bitrate-scale > trough > highlight { background: #9ae600; }
+scale.bitrate-scale > trough > slider { background: #e8e8e8; }
 """
 
 
@@ -483,7 +487,7 @@ class BeamWindow(Adw.ApplicationWindow):
         requested = options.effective_fps(self.config)
         try:
             self.launcher.stream(address, app, display_pos=self._monitor_pos(),
-                                 host_name=host.name,
+                                 host_name=host.name, host_key=host_key(host),
                                  on_exit=lambda r: self._on_stream_end(r, host, requested))
             return True
         except Exception as e:  # noqa: BLE001
@@ -539,73 +543,8 @@ class BeamWindow(Adw.ApplicationWindow):
             self._test_dialog(host)
 
     def _test_dialog(self, host: Host):
-        from . import diagnose
-
-        address = self.launcher.address_for(host)
-        dlg = Adw.Dialog(title=f"Test connection · {host.name}",
-                         content_width=520, content_height=600)
-        view = Adw.ToolbarView()
-        view.add_top_bar(Adw.HeaderBar())
-        dlg.set_child(view)
-
-        stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
-        view.set_content(stack)
-
-        busy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
-                       valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        spinner = Adw.Spinner(width_request=48, height_request=48)
-        busy.append(spinner)
-        status = Gtk.Label(label="Starting…")
-        status.add_css_class("dim-label")
-        busy.append(status)
-        note = Gtk.Label(label=f"Streams from {address} in the background\n"
-                               "using your current settings. Nothing opens on screen.",
-                         justify=Gtk.Justification.CENTER)
-        note.add_css_class("caption")
-        note.add_css_class("dim-label")
-        busy.append(note)
-        stack.add_named(busy, "busy")
-
-        def show(report):
-            page = Adw.PreferencesPage()
-            if report.error:
-                err = Adw.PreferencesGroup(title="Test failed",
-                                           description=GLib.markup_escape_text(report.error))
-                page.add(err)
-            if report.metrics:
-                group = Adw.PreferencesGroup(
-                    title="Measured",
-                    description=GLib.markup_escape_text(
-                        f"{address} · targets are typical for a healthy LAN stream"))
-                for m in report.metrics:
-                    row = Adw.ActionRow(title=m.label, subtitle=m.target, use_markup=False)
-                    value = Gtk.Label(label=m.value)
-                    value.add_css_class(f"diag-{m.rating}")
-                    row.add_suffix(value)
-                    group.add(row)
-                page.add(group)
-            if report.advice:
-                tips = Adw.PreferencesGroup(title="What to improve")
-                for tip in report.advice:
-                    label = Gtk.Label(label=tip, wrap=True, xalign=0,
-                                      margin_top=10, margin_bottom=10,
-                                      margin_start=12, margin_end=12)
-                    tips.add(label)
-                page.add(tips)
-            stack.add_named(page, "result")
-            stack.set_visible_child_name("result")
-            return False
-
-        def work():
-            report = diagnose.run(
-                self.launcher, address,
-                self.config.get("default_app") or "Desktop",
-                seconds=int(self.config.get("test_seconds") or 15),
-                progress=lambda msg: GLib.idle_add(status.set_label, msg))
-            GLib.idle_add(show, report)
-
-        threading.Thread(target=work, daemon=True).start()
-        dlg.present(self)
+        from .testdialog import TestDialog
+        TestDialog(self, host, host_key(host)).present(self)
 
     def _pair_dialog(self, host: Host):
         address = self.launcher.address_for(host)

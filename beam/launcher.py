@@ -15,7 +15,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
-from . import options, probe
+from . import bitrate, options, probe
 
 
 # Self-built Moonlight fork with the in-stream Beam pill
@@ -120,19 +120,15 @@ class MoonlightLauncher:
         return resolve_moonlight_bin(self.config.get("moonlight_bin", ""))
 
     # ---- command construction -------------------------------------------
-    def bitrate_for(self, address: str | None = None) -> int:
-        """Kbps to ask for (0 = Moonlight's automatic choice). Away from the home
-        network the stream is capped: Moonlight can't lower its bitrate when a
-        link (e.g. a phone hotspot) can't keep up, so too much shows up as lost
-        frames and a frozen picture."""
-        c = self.config
-        bitrate = int(c.get("bitrate") or 0)
-        away = int(c.get("away_bitrate") or 0)
-        if address is None or away <= 0 or probe.is_lan_address(address):
-            return bitrate
-        return min(bitrate, away) if bitrate else away
+    def bitrate_for(self, address: str | None = None, host_key: str | None = None) -> int:
+        """Kbps to ask for (0 = Moonlight's automatic choice); see bitrate.choose.
+        No address (the benchmark) means the Home bitrate as configured."""
+        if address is None:
+            return int(self.config.get("bitrate") or 0)
+        route = bitrate.route_of(probe.is_lan_address(address))
+        return bitrate.choose(self.config, route, host_key)
 
-    def video_args(self, address: str | None = None) -> list[str]:
+    def video_args(self, address: str | None = None, host_key: str | None = None) -> list[str]:
         """Options that shape the video pipeline (shared with the benchmark)."""
         c = self.config
         args = []
@@ -140,20 +136,20 @@ class MoonlightLauncher:
         if res:
             args += ["--resolution", res]
         args += ["--fps", str(options.effective_fps(c))]
-        bitrate = self.bitrate_for(address)
-        if bitrate:
-            args += ["--bitrate", str(bitrate)]
+        kbps = self.bitrate_for(address, host_key)
+        if kbps:
+            args += ["--bitrate", str(kbps)]
         args += ["--video-codec", c.get("video_codec") or "auto",
                  "--video-decoder", c.get("video_decoder") or "auto"]
         args.append("--vsync" if c.get("vsync") else "--no-vsync")
         args.append("--frame-pacing" if c.get("frame_pacing") else "--no-frame-pacing")
         return args
 
-    def _stream_args(self, address: str, app: str) -> list[str]:
+    def _stream_args(self, address: str, app: str, host_key: str | None = None) -> list[str]:
         c = self.config
         if app == DESKTOP_APP:
             c = dict(c, quit_after=True)
-        args = [self.bin, "stream", *self.video_args(address), *options.cli_args(c)]
+        args = [self.bin, "stream", *self.video_args(address, host_key), *options.cli_args(c)]
         stats = c.get("stats_level") or "off"
         args.append("--no-performance-overlay" if stats == "off" else "--performance-overlay")
         if c.get("display_mode"):
@@ -204,14 +200,14 @@ class MoonlightLauncher:
 
     def stream(self, address: str, app: str | None = None,
                display_pos: tuple[int, int] | None = None,
-               on_exit=None, host_name: str = "") -> Path:
+               on_exit=None, host_name: str = "", host_key: str | None = None) -> Path:
         """Launch a stream without blocking. Moonlight's output goes to a log
         file (returned); `on_exit(StreamResult)` runs on the main loop when the
         stream ends."""
         if not probe.valid_address(address):
             raise ValueError(f"not a valid host address: {address!r}")
         app = app or self.config.get("default_app") or DESKTOP_APP
-        args = self._stream_args(address, app)
+        args = self._stream_args(address, app, host_key)
         log_path = _new_log_path(address)
         launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.STDERR_MERGE)
         launcher.set_stdout_file_path(str(log_path))

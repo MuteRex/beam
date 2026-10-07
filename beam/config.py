@@ -17,6 +17,8 @@ DEFAULTS = {
     "fps": 60,
     "bitrate": 0,                # Kbps, 0 = Moonlight auto
     "away_bitrate": 8000,        # Kbps cap off the home network, 0 = no cap
+    # From Test connection: {host key: {"name", "home": kbps, "away": kbps}}
+    "host_bitrates": {},
     "display_mode": "fullscreen",  # fullscreen / borderless / windowed
     "audio_config": "stereo",    # stereo / 5.1-surround / 7.1-surround
     "default_app": "Desktop",    # which Sunshine app to stream
@@ -59,6 +61,19 @@ def _coerce(key: str, value):
                 if isinstance(k, str) and isinstance(v, dict)
                 and isinstance(v.get("fps"), int) and not isinstance(v.get("fps"), bool)
                 and 1 <= v["fps"] <= 1000}
+    if key == "host_bitrates" and isinstance(value, dict):
+        clean = {}
+        for k, v in value.items():
+            if not isinstance(k, str) or not isinstance(v, dict):
+                continue
+            entry = {"name": v.get("name") if isinstance(v.get("name"), str) else ""}
+            for route in ("home", "away"):
+                kbps = v.get(route)
+                if isinstance(kbps, int) and not isinstance(kbps, bool) and 0 < kbps <= 1_000_000:
+                    entry[route] = kbps
+            if "home" in entry or "away" in entry:
+                clean[k] = entry
+        return clean
     if key == "fps_warning_muted" and isinstance(value, list):
         return [k for k in value if isinstance(k, str)]
     return default

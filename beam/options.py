@@ -77,9 +77,9 @@ ADVANCED = [
         Option("host_screens", "spin", "Host screens",
                "Screen buttons in the in-stream Beam menu; Sunshine switches monitors mid-stream",
                2, low=1, high=12, step=1),
-        Option("test_seconds", "spin", "Test connection length",
-               "Seconds of headless streaming per connection test", 15,
-               low=5, high=60, step=5),
+        Option("test_step_seconds", "spin", "Test connection step length",
+               "Seconds measured at each bitrate step (5 steps at most)", 5,
+               low=3, high=20, step=1),
     ]),
 ]
 
