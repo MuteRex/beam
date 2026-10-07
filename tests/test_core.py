@@ -306,3 +306,51 @@ class HostScreensOption(unittest.TestCase):
             config.save(cfg)
             self.assertEqual(config.load()["host_screens"], 4)
 
+
+class LanAddress(unittest.TestCase):
+    def test_home_network(self):
+        for a in ("192.168.68.210", "10.0.0.5", "172.20.10.2", "169.254.3.4",
+                  "fe80::1", "fd12:3456::1", "simon-gaming-pc.local", "host.local."):
+            self.assertTrue(probe.is_lan_address(a), a)
+
+    def test_away(self):
+        for a in ("100.64.25.30", "100.125.188.27", "fd7a:115c:a1e0::eb2a:191f",
+                  "102.165.66.138", "8.8.8.8", "2001:db8::1", "simon-vivobook",
+                  "simon-vivobook.tail1234.ts.net", "127.0.0.1", "", None):
+            self.assertFalse(probe.is_lan_address(a), a)
+
+
+class AwayBitrate(unittest.TestCase):
+    """Streams over the internet are capped so a weak link doesn't freeze."""
+
+    def launcher(self, **overrides):
+        return MoonlightLauncher(dict(config.DEFAULTS, **overrides))
+
+    def test_lan_keeps_home_bitrate(self):
+        self.assertEqual(self.launcher().bitrate_for("192.168.68.210"), 0)
+        self.assertEqual(self.launcher(bitrate=40000).bitrate_for("192.168.68.210"), 40000)
+
+    def test_tailnet_is_capped(self):
+        self.assertEqual(self.launcher().bitrate_for("100.64.25.30"), 8000)
+        self.assertEqual(self.launcher(bitrate=40000).bitrate_for("100.64.25.30"), 8000)
+
+    def test_lower_home_bitrate_wins(self):
+        self.assertEqual(self.launcher(bitrate=5000).bitrate_for("100.64.25.30"), 5000)
+
+    def test_cap_off(self):
+        self.assertEqual(self.launcher(away_bitrate=0).bitrate_for("100.64.25.30"), 0)
+        self.assertEqual(self.launcher(away_bitrate=0, bitrate=30000).bitrate_for("100.64.25.30"), 30000)
+
+    def test_benchmark_args_unchanged(self):
+        # No address: the benchmark keeps measuring the configured bitrate
+        self.assertNotIn("--bitrate", self.launcher().video_args())
+
+    def test_stream_command_carries_cap(self):
+        launcher = self.launcher()
+        with mock.patch.object(MoonlightLauncher, "bin", new_callable=mock.PropertyMock,
+                               return_value="/usr/bin/moonlight"):
+            away = launcher._stream_args("100.64.25.30", "Desktop")
+            home = launcher._stream_args("192.168.68.210", "Desktop")
+        self.assertEqual(away[away.index("--bitrate") + 1], "8000")
+        self.assertNotIn("--bitrate", home)
+

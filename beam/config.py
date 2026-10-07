@@ -16,6 +16,7 @@ DEFAULTS = {
     "resolution": "1920x1080",   # "" = Moonlight default
     "fps": 60,
     "bitrate": 0,                # Kbps, 0 = Moonlight auto
+    "away_bitrate": 8000,        # Kbps cap off the home network, 0 = no cap
     "display_mode": "fullscreen",  # fullscreen / borderless / windowed
     "audio_config": "stereo",    # stereo / 5.1-surround / 7.1-surround
     "default_app": "Desktop",    # which Sunshine app to stream

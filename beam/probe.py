@@ -46,6 +46,30 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirect)
 
 
+# Tailscale's IPv6 range is a ULA too, but it reaches peers over the internet
+_TAILSCALE_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+_TAILSCALE_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
+def is_lan_address(address: str) -> bool:
+    """True for addresses on the local network (private IPv4, link-local, IPv6
+    ULA, *.local names). Tailscale addresses and public ones are "away": the
+    stream crosses the internet, where bandwidth is lower and less steady."""
+    if not isinstance(address, str) or not address:
+        return False
+    if address.rstrip(".").lower().endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False  # other names (MagicDNS, DNS) could be anywhere
+    if ip in _TAILSCALE_V4 or ip in _TAILSCALE_V6:
+        return False
+    if ip.version == 6:
+        return ip.is_link_local or ip in ipaddress.ip_network("fc00::/7")
+    return ip.is_private and not ip.is_loopback or ip.is_link_local
+
+
 def server_info(address: str, timeout: float = 1.5) -> dict[str, str] | None:
     """Sunshine's unauthenticated serverinfo as {tag: text}, or None."""
     if not valid_address(address):

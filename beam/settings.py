@@ -54,6 +54,14 @@ class SettingsDialog(Adw.PreferencesDialog):
                 value=int(self.config.get("bitrate", 0)) / 1000))
         video.add(self.bitrate)
 
+        self.away_bitrate = Adw.SpinRow(
+            title="Away bitrate (Mbps, 0 = no limit)",
+            subtitle="Cap when streaming over the internet, e.g. a phone hotspot",
+            adjustment=Gtk.Adjustment(
+                lower=0, upper=150, step_increment=1,
+                value=int(self.config.get("away_bitrate", 8000)) / 1000))
+        video.add(self.away_bitrate)
+
         self.display = _combo(DISPLAY, self.config.get("display_mode"))
         self._row(video, "Display mode", self.display)
 
@@ -246,6 +254,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.config["resolution"] = RESOLUTIONS[self.res.get_selected()]
         self.config["fps"] = int(FPS[self.fps.get_selected()])
         self.config["bitrate"] = int(self.bitrate.get_value() * 1000)
+        self.config["away_bitrate"] = int(self.away_bitrate.get_value() * 1000)
         self.config["display_mode"] = DISPLAY[self.display.get_selected()]
         self.config["audio_config"] = AUDIO[self.audio.get_selected()]
         self.config["multi_controller"] = self.multi.get_active()
