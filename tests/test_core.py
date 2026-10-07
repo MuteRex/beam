@@ -255,3 +255,54 @@ class ServerInfo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForkEnv(unittest.TestCase):
+    """What Beam tells the fork about its in-stream menu."""
+
+    def env(self, display_pos=None, **overrides):
+        cfg = dict(config.DEFAULTS, **overrides)
+        return MoonlightLauncher(cfg).fork_env(display_pos)
+
+    def test_defaults(self):
+        env = self.env()
+        self.assertEqual(env["BEAM_SCREENS"], "2")
+        self.assertNotIn("BEAM_HIDE_PILL", env)
+        self.assertNotIn("BEAM_STATS_LEVEL", env)
+        self.assertNotIn("BEAM_DISPLAY_POS", env)
+
+    def test_host_screens_passed_and_clamped(self):
+        self.assertEqual(self.env(host_screens=3)["BEAM_SCREENS"], "3")
+        self.assertEqual(self.env(host_screens=12)["BEAM_SCREENS"], "12")
+        self.assertEqual(self.env(host_screens=40)["BEAM_SCREENS"], "12")
+        self.assertEqual(self.env(host_screens=-1)["BEAM_SCREENS"], "1")
+
+    def test_pill_stats_and_display(self):
+        env = self.env((1920, 0), show_pill=False, stats_level="advanced")
+        self.assertEqual(env["BEAM_HIDE_PILL"], "1")
+        self.assertEqual(env["BEAM_STATS_LEVEL"], "advanced")
+        self.assertEqual(env["BEAM_DISPLAY_POS"], "1920,0")
+
+    def test_all_values_are_strings(self):
+        for value in self.env((0, 0), show_pill=False, stats_level="basic").values():
+            self.assertIsInstance(value, str)
+
+
+class HostScreensOption(unittest.TestCase):
+    def test_is_beam_only(self):
+        # Never reaches Moonlight's command line, only BEAM_SCREENS
+        opt = next(o for o in options.ALL if o.key == "host_screens")
+        self.assertEqual(opt.flag, "")
+        self.assertEqual((opt.low, opt.high, opt.default), (1, 12, 2))
+        self.assertEqual(options.cli_args(dict(config.DEFAULTS, host_screens=5)),
+                         options.cli_args(dict(config.DEFAULTS, host_screens=2)))
+
+    def test_saved_value_survives_config_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(config, "CONFIG_DIR", Path(tmp)), \
+                mock.patch.object(config, "CONFIG_PATH", Path(tmp) / "config.json"):
+            cfg = config.load()
+            cfg["host_screens"] = 4
+            config.save(cfg)
+            self.assertEqual(config.load()["host_screens"], 4)
+

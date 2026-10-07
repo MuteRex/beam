@@ -173,6 +173,22 @@ class MoonlightLauncher:
             return lan
         return tailnet or lan or host.address
 
+    def fork_env(self, display_pos: tuple[int, int] | None = None) -> dict[str, str]:
+        """Environment the fork reads for its in-stream menu and stats."""
+        env = {}
+        if not self.config.get("show_pill", True):
+            env["BEAM_HIDE_PILL"] = "1"
+        if (self.config.get("stats_level") or "off") != "off":
+            # The fork's stats panel level (it cycles in-stream from the Beam menu)
+            env["BEAM_STATS_LEVEL"] = self.config["stats_level"]
+        # Screen buttons in the fork's menu (Sunshine's Ctrl+Alt+Shift+F1..F12)
+        screens = self.config.get("host_screens") or 2
+        env["BEAM_SCREENS"] = str(max(1, min(12, int(screens))))
+        if display_pos is not None:
+            # The fork opens the stream on this monitor (Wayland can't tell it)
+            env["BEAM_DISPLAY_POS"] = "%d,%d" % display_pos
+        return env
+
     def stream(self, address: str, app: str | None = None,
                display_pos: tuple[int, int] | None = None,
                on_exit=None, host_name: str = "") -> Path:
@@ -186,16 +202,8 @@ class MoonlightLauncher:
         log_path = _new_log_path(address)
         launcher = Gio.SubprocessLauncher.new(Gio.SubprocessFlags.STDERR_MERGE)
         launcher.set_stdout_file_path(str(log_path))
-        if not self.config.get("show_pill", True):
-            launcher.setenv("BEAM_HIDE_PILL", "1", True)
-        if (self.config.get("stats_level") or "off") != "off":
-            # The fork's stats panel level (it cycles in-stream from the Beam menu)
-            launcher.setenv("BEAM_STATS_LEVEL", self.config["stats_level"], True)
-        # Screen buttons in the fork's menu (Sunshine's Ctrl+Alt+Shift+F1..F12)
-        launcher.setenv("BEAM_SCREENS", str(int(self.config.get("host_screens") or 2)), True)
-        if display_pos is not None:
-            # The fork opens the stream on this monitor (Wayland can't tell it)
-            launcher.setenv("BEAM_DISPLAY_POS", "%d,%d" % display_pos, True)
+        for name, value in self.fork_env(display_pos).items():
+            launcher.setenv(name, value, True)
         proc = launcher.spawnv(args)
 
         def done(p, res):
