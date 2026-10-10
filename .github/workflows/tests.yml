@@ -1,0 +1,14 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unittest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # System PyGObject: the tests import GTK 4 / libadwaita (no display needed)
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-4.0 gir1.2-adw-1
+      - run: python3 -m unittest discover -s tests -v
