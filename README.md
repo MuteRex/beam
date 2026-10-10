@@ -32,9 +32,17 @@ launcher and discovery layer: the part Moonlight leaves manual.
 - One-click Connect, Fullscreen/Windowed, Desktop (cursor free) / Game (cursor
   locked) mouse modes, pairing and app picker dialogs.
 - Settings for every Moonlight stream option, always passed explicitly so
-  Moonlight's own saved preferences never change a Beam stream.
-- **Test connection…**: ping, host encoder check and a short headless stream
-  measured with your settings, with advice.
+  Moonlight's own saved preferences never change a Beam stream. **Presets**
+  (Latency / Balanced / Quality) set codec, home bitrate, V-Sync and frame
+  pacing in one click.
+- Separate **home** and **away** bitrates: streams off the LAN are capped at the
+  Away bitrate. On a **metered** connection (NetworkManager's flag, e.g. a phone
+  hotspot) every stream is capped at it, and cards show the data an hour of
+  streaming would use.
+- **Test connection…** (⋯ menu): ping and host encoder check, then headless
+  streams at rising bitrates (10–80 Mbps at home, 3–25 Mbps away) until frames
+  drop, with live progress. It recommends a bitrate with headroom, which you
+  can save for that computer and route. Asks first on a metered connection.
 - With the Moonlight fork: a clickable in-stream **Beam pill** and menu (mouse
   mode, fullscreen, stats level, paste, release mouse, minimize, disconnect),
   a three-level performance stats panel, and clipboard paste typed as real
