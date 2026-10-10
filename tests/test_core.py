@@ -232,6 +232,7 @@ class ServerInfo(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def test_parses_and_caps(self):
         with mock.patch.object(probe, "SERVERINFO_PORT", self.server.server_port):
@@ -323,6 +324,11 @@ class LanAddress(unittest.TestCase):
 class AwayBitrate(unittest.TestCase):
     """Streams over the internet are capped so a weak link doesn't freeze."""
 
+    def setUp(self):
+        patcher = mock.patch.object(probe, "network_metered", return_value=False)
+        self.metered = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def launcher(self, **overrides):
         return MoonlightLauncher(dict(config.DEFAULTS, **overrides))
 
@@ -333,6 +339,12 @@ class AwayBitrate(unittest.TestCase):
     def test_tailnet_is_capped(self):
         self.assertEqual(self.launcher().bitrate_for("100.64.25.30"), 8000)
         self.assertEqual(self.launcher(bitrate=40000).bitrate_for("100.64.25.30"), 8000)
+
+    def test_metered_caps_the_lan_too(self):
+        self.metered.return_value = True
+        self.assertEqual(self.launcher(bitrate=40000).bitrate_for("192.168.68.210"), 8000)
+        self.assertEqual(self.launcher(away_bitrate=0, bitrate=40000)
+                         .bitrate_for("192.168.68.210"), 40000)
 
     def test_lower_home_bitrate_wins(self):
         self.assertEqual(self.launcher(bitrate=5000).bitrate_for("100.64.25.30"), 5000)

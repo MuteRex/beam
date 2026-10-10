@@ -219,9 +219,27 @@ class TestDialog(Adw.Dialog):
         start = Gtk.Button(label="Start test", halign=Gtk.Align.CENTER, margin_top=8)
         start.add_css_class("suggested-action")
         start.add_css_class("pill")
-        start.connect("clicked", lambda *_: self._start())
+        start.connect("clicked", lambda *_: self._confirm_metered())
         page.append(start)
         self.stack.add_named(page, "intro")
+
+    def _confirm_metered(self):
+        """On a metered connection (a phone hotspot) ask first: the test can
+        use tens of MB."""
+        if not probe.network_metered():
+            self._start()
+            return
+        _seconds, mb = diagnose.estimate(self.route, self.step_seconds)
+        dlg = Adw.AlertDialog(
+            heading="Use mobile data?",
+            body=(f"This connection is metered. The test can use up to {mb:.0f} MB "
+                  "of data."))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("start", "Start test")
+        dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
+        dlg.set_close_response("cancel")
+        dlg.connect("response", lambda _d, resp: resp == "start" and self._start())
+        dlg.present(self)
 
     # ---- running --------------------------------------------------------
     def _build_running(self):

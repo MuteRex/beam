@@ -15,6 +15,8 @@ import socket
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+from gi.repository import Gio
+
 # Sunshine / GameStream control ports. 47989 = HTTP serverinfo (always open when
 # hosting), 47984 = HTTPS. One open is enough to call it a host.
 HOST_PORTS = (47989, 47984)
@@ -134,3 +136,11 @@ def mark_hostable(hosts, timeout: float = 0.7) -> None:
         results = ex.map(lambda h: (h, is_hostable(h.address, timeout)), online)
         for h, ok in results:
             h.extra["hostable"] = ok
+
+
+def network_metered() -> bool:
+    """True on a connection NetworkManager marks as metered (a phone hotspot)."""
+    try:
+        return Gio.NetworkMonitor.get_default().get_network_metered()
+    except Exception:  # noqa: BLE001 - no network monitor: assume unmetered
+        return False

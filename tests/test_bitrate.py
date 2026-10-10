@@ -72,6 +72,17 @@ class Choose(unittest.TestCase):
         self.assertEqual(bitrate.choose(c, "away", "other"), 8000)
         self.assertEqual(bitrate.choose(c, "away", None), 8000)
 
+    def test_metered_caps_every_route(self):
+        c = self.conf(bitrate=40000, host_bitrates={"pc": {"name": "pc", "away": 12000,
+                                                           "home": 60000}})
+        self.assertEqual(bitrate.choose(c, "home", None, metered=True), 8000)
+        self.assertEqual(bitrate.choose(c, "home", "pc", metered=True), 8000)  # tested too
+        self.assertEqual(bitrate.choose(c, "away", "pc", metered=True), 8000)
+        self.assertEqual(bitrate.choose(self.conf(), "home", metered=True), 8000)  # auto
+        self.assertEqual(bitrate.choose(self.conf(bitrate=5000), "home", metered=True), 5000)
+        self.assertEqual(bitrate.choose(self.conf(away_bitrate=0, bitrate=40000), "home",
+                                        metered=True), 40000)  # no cap set
+
     def test_bad_saved_values_ignored(self):
         for bad in (True, "12000", -5, 0, None):
             c = self.conf(host_bitrates={"pc": {"away": bad}})
@@ -83,7 +94,8 @@ class LauncherUsesHostKey(unittest.TestCase):
         c = dict(config.DEFAULTS, host_bitrates={"pc": {"name": "pc", "away": 12000, "home": 60000}})
         launcher = MoonlightLauncher(c)
         with mock.patch.object(MoonlightLauncher, "bin", new_callable=mock.PropertyMock,
-                               return_value="/usr/bin/moonlight"):
+                               return_value="/usr/bin/moonlight"), \
+                mock.patch("beam.probe.network_metered", return_value=False):
             away = launcher._stream_args("100.64.25.30", "Desktop", "pc")
             home = launcher._stream_args("192.168.68.210", "Desktop", "pc")
         self.assertEqual(away[away.index("--bitrate") + 1], "12000")

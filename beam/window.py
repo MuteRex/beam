@@ -10,7 +10,7 @@ from gi.repository import Adw, Gtk, GLib, Gio  # noqa: E402
 
 from . import __version__  # noqa: E402
 from . import config as cfg  # noqa: E402
-from . import options, probe  # noqa: E402
+from . import bitrate, options, probe  # noqa: E402
 from .launcher import DESKTOP_APP, MoonlightLauncher, host_refresh_limit  # noqa: E402
 from .providers import ALL_PROVIDERS, Host  # noqa: E402
 
@@ -74,6 +74,7 @@ switch:checked > slider { background-color: #0c0c0c; }
 }
 .route-lan { background: #243018; color: #9ae600; }
 .route-relay { background: #33270f; color: #f5c211; }
+.route-metered { background: #33270f; color: #f5c211; }
 
 .diag-good { color: #9ae600; font-weight: 600; }
 .diag-ok { color: #f5c211; font-weight: 600; }
@@ -85,8 +86,10 @@ scale.bitrate-scale > trough > slider { background: #e8e8e8; }
 """
 
 
-def route_chips(host: Host):
-    """Small badges for each way Beam can reach the host, fastest first."""
+def route_chips(host: Host, metered_kbps: int | None = None):
+    """Small badges for each way Beam can reach the host, fastest first, plus
+    the data a stream would use when this machine is on a metered connection
+    (`metered_kbps` set; 0 = Moonlight's automatic bitrate)."""
     routes = {r["kind"] for r in host.extra.get("routes") or []}
     labels = []
     if "lan" in routes or host.extra.get("lan_address"):
@@ -95,6 +98,10 @@ def route_chips(host: Host):
         relay = host.extra.get("ts_path") == "relay"
         labels.append(("Tailscale relay" if relay else "Tailscale",
                        "route-relay" if relay else "route-tailscale"))
+    if metered_kbps is not None:
+        gb = bitrate.gb_per_hour(metered_kbps)
+        labels.append((f"Metered · {gb:.1f} GB/h" if metered_kbps else "Metered · auto bitrate",
+                       "route-metered"))
     if not labels:
         return None
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4, halign=Gtk.Align.START)
@@ -157,7 +164,11 @@ class HostCard(Gtk.Box):
         status.append(slabel)
         body.append(status)
 
-        chips = route_chips(host)
+        metered_kbps = None
+        if window.metered:
+            metered_kbps = window.launcher.bitrate_for(window.launcher.address_for(host),
+                                                       host_key(host))
+        chips = route_chips(host, metered_kbps)
         if chips:
             body.append(chips)
 
@@ -200,6 +211,9 @@ class BeamWindow(Adw.ApplicationWindow):
         self._hosts_by_id: dict[str, Host] = {}
         self._all_hosts: list[Host] = []
         self._refresh_gen = 0  # newest refresh wins; slower old ones are dropped
+        self.metered = probe.network_metered()
+        Gio.NetworkMonitor.get_default().connect("notify::network-metered",
+                                                 self._on_metered_changed)
 
         # force dark, Parsec-like
         Adw.StyleManager.get_default().set_color_scheme(
@@ -369,6 +383,18 @@ class BeamWindow(Adw.ApplicationWindow):
         self.config["mouse_mode"] = mode
         cfg.save(self.config)
         self._toast(f"Mouse: {'cursor free' if mode == 'desktop' else 'cursor locked'}")
+
+    def _on_metered_changed(self, *_):
+        metered = probe.network_metered()
+        if metered == self.metered:
+            return
+        self.metered = metered
+        self._render_hosts()  # update the data-use chips
+        if metered:
+            away = int(self.config.get("away_bitrate") or 0)
+            self._toast("Metered connection: streams capped at "
+                        f"{bitrate.label(away)}" if away else
+                        "Metered connection: set an Away bitrate in Settings to save data")
 
     # ---- refresh --------------------------------------------------------
     def refresh(self):

@@ -53,16 +53,24 @@ def host_limit(config: dict, host_key: str | None, route: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
-def choose(config: dict, route: str, host_key: str | None = None) -> int:
+def _cap(kbps: int, limit: int) -> int:
+    """`kbps` no higher than `limit` (0 = no limit); 0 (auto) becomes the limit."""
+    if limit <= 0:
+        return kbps
+    return min(kbps, limit) if kbps else limit
+
+
+def choose(config: dict, route: str, host_key: str | None = None,
+           metered: bool = False) -> int:
     """Per-computer value from Test connection, else Home bitrate, capped at
-    Away bitrate off the LAN (Moonlight can't lower its bitrate mid-stream)."""
+    Away bitrate off the LAN (Moonlight can't lower its bitrate mid-stream).
+    On a metered connection (a phone hotspot) the Away bitrate caps every
+    stream, tested values included."""
+    away = int(config.get("away_bitrate") or 0)
     tested = host_limit(config, host_key, route)
     if tested:
-        return min(tested, MAX_KBPS)
-    home = int(config.get("bitrate") or 0)
-    if route == HOME:
-        return home
-    away = int(config.get("away_bitrate") or 0)
-    if away <= 0:
-        return home
-    return min(home, away) if home else away
+        kbps = min(tested, MAX_KBPS)
+    else:
+        home = int(config.get("bitrate") or 0)
+        kbps = home if route == HOME else _cap(home, away)
+    return _cap(kbps, away) if metered else kbps

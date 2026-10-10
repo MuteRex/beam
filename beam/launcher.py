@@ -126,7 +126,7 @@ class MoonlightLauncher:
         if address is None:
             return int(self.config.get("bitrate") or 0)
         route = bitrate.route_of(probe.is_lan_address(address))
-        return bitrate.choose(self.config, route, host_key)
+        return bitrate.choose(self.config, route, host_key, probe.network_metered())
 
     def video_args(self, address: str | None = None, host_key: str | None = None) -> list[str]:
         """Options that shape the video pipeline (shared with the benchmark)."""
