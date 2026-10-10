@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 
-from beam import bench, bitrate, config, diagnose  # noqa: E402
+from beam import bench, bitrate, config, diagnose, presets  # noqa: E402
 from beam.diagnose import BAD, GOOD, OK, Step  # noqa: E402
 from beam.launcher import MoonlightLauncher  # noqa: E402
 
@@ -87,6 +87,32 @@ class Choose(unittest.TestCase):
         for bad in (True, "12000", -5, 0, None):
             c = self.conf(host_bitrates={"pc": {"away": bad}})
             self.assertEqual(bitrate.host_limit(c, "pc", "away"), 0, bad)
+
+
+class Presets(unittest.TestCase):
+    def test_each_preset_matches_itself(self):
+        for preset_id, *_ in presets.PRESETS:
+            self.assertEqual(presets.matching(presets.values(preset_id)), preset_id)
+
+    def test_defaults_are_balanced(self):
+        self.assertEqual(presets.matching(config.DEFAULTS), "balanced")
+
+    def test_custom_mix_matches_none(self):
+        mix = dict(presets.values("latency"), vsync=True)
+        self.assertIsNone(presets.matching(mix))
+
+    def test_values_are_valid_settings(self):
+        from beam.settings import CODECS
+        for _id, _label, _tip, vals in presets.PRESETS:
+            self.assertEqual(set(vals), set(presets.KEYS))
+            self.assertIn(vals["video_codec"], CODECS)
+            self.assertIn(vals["bitrate"], bitrate.STEPS_KBPS)
+            for key in presets.KEYS:
+                self.assertIs(type(vals[key]), type(config.DEFAULTS[key]), key)
+
+    def test_values_returns_a_copy(self):
+        presets.values("quality")["bitrate"] = 1
+        self.assertEqual(presets.values("quality")["bitrate"], 50000)
 
 
 class LauncherUsesHostKey(unittest.TestCase):

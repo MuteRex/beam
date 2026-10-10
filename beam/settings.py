@@ -5,7 +5,7 @@ from gi.repository import Adw, Gtk
 
 from . import bitrate
 from . import config as cfg
-from . import options
+from . import options, presets
 from .launcher import is_fork, resolve_moonlight_bin
 
 RESOLUTIONS = ["1280x720", "1920x1080", "2560x1440", "3840x2160"]
@@ -106,6 +106,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.unmute.connect("activated", self._unmute_fps_warnings)
         video.add(self.unmute)
 
+        presets_group = self._build_presets_group(page)
+
         self._build_bitrate_group(page)
 
         latency = Adw.PreferencesGroup(
@@ -140,6 +142,13 @@ class SettingsDialog(Adw.PreferencesDialog):
         current = self.config.get("stats_level", "off")
         self.stats.set_selected(STATS_LEVELS.index(current) if current in STATS_LEVELS else 0)
         latency.add(self.stats)
+
+        for widget, signal in ((self.codec, "notify::selected"),
+                               (self.bitrate.scale, "value-changed"),
+                               (self.vsync, "notify::active"),
+                               (self.pacing, "notify::active")):
+            widget.connect(signal, self._sync_preset)
+        self._sync_preset()
 
         audio = Adw.PreferencesGroup(title="Audio &amp; input")
         page.add(audio)
@@ -179,6 +188,64 @@ class SettingsDialog(Adw.PreferencesDialog):
         advanced.add(self._reset_group)
 
         self.connect("closed", self._save)
+
+    # ---- presets ------------------------------------------------------
+    def _build_presets_group(self, page):
+        group = Adw.PreferencesGroup(
+            title="Preset",
+            description="Sets codec, home bitrate, V-Sync and frame pacing together.")
+        page.add(group)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, homogeneous=True,
+                      halign=Gtk.Align.FILL)
+        box.add_css_class("linked")
+        box.add_css_class("beam-presets")
+        self._preset_buttons = {}
+        # Not a toggle group: a custom mix lights none of them (see _sync_preset)
+        for preset_id, label, tip, _values in presets.PRESETS:
+            button = Gtk.ToggleButton(label=label, tooltip_text=tip, hexpand=True)
+            button.connect("toggled", self._on_preset, preset_id)
+            box.append(button)
+            self._preset_buttons[preset_id] = button
+        group.add(box)
+        self._preset_custom = Gtk.Label(label="Custom: your own mix of the settings below",
+                                        xalign=0, margin_top=6)
+        self._preset_custom.add_css_class("caption")
+        self._preset_custom.add_css_class("dim-label")
+        group.add(self._preset_custom)
+        self._applying_preset = False
+        return group
+
+    def _current_preset_settings(self) -> dict:
+        return {"video_codec": CODECS[self.codec.get_selected()],
+                "bitrate": self.bitrate.kbps,
+                "vsync": self.vsync.get_active(),
+                "frame_pacing": self.pacing.get_active()}
+
+    def _on_preset(self, button, preset_id):
+        if self._applying_preset:
+            return
+        if not button.get_active():
+            self._sync_preset()  # clicking the lit preset keeps it lit
+            return
+        vals = presets.values(preset_id)
+        self._applying_preset = True
+        self.codec.set_selected(CODECS.index(vals["video_codec"]))
+        self.bitrate.scale.set_value(bitrate.index_for(vals["bitrate"]))
+        self.vsync.set_active(vals["vsync"])
+        self.pacing.set_active(vals["frame_pacing"])
+        self._applying_preset = False
+        self._sync_preset()
+
+    def _sync_preset(self, *_):
+        """Light up the preset the controls match; none when it's a custom mix."""
+        if self._applying_preset:
+            return
+        current = presets.matching(self._current_preset_settings())
+        self._applying_preset = True
+        for preset_id, button in self._preset_buttons.items():
+            button.set_active(preset_id == current)
+        self._applying_preset = False
+        self._preset_custom.set_visible(current is None)
 
     def _update_fps_note(self, *_):
         custom = int(self.config.get("custom_fps") or 0)

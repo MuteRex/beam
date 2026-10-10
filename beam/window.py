@@ -66,6 +66,7 @@ CSS = b"""
 button.suggested, button.suggested-action { background: #9ae600; color: #0c0c0c; }
 button.suggested:hover, button.suggested-action:hover { background: #aef31a; }
 switch:checked { background-color: #9ae600; }
+.beam-presets > button:checked { background: #9ae600; color: #0c0c0c; }
 switch:checked > slider { background-color: #0c0c0c; }
 
 .route-chip {
